@@ -1,5 +1,12 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Chácara ZK — TESTE</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="manifest" href="manifest_teste.webmanifest">
+<meta name="theme-color" content="#b26b00">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ZK TESTE">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-teste.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <style>
@@ -345,7 +352,14 @@ async function carregar(){
     q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs",["vigente_desde",{ascending:false}]),
     q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}])]);
   Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],quando:new Date()});
+  salvarSnapshot();
 }
+/* Snapshot local da última posição carregada — é o que o app mostra quando abre sem sinal (chave por ambiente). */
+const SNAP_KEY="zk_pos_"+SUPA_URL.replace("https://","").split(".")[0];
+function salvarSnapshot(){try{localStorage.setItem(SNAP_KEY,JSON.stringify({...D,quando:D.quando?D.quando.toISOString():null}));}catch(e){}}
+function restaurarSnapshot(){try{const s=JSON.parse(localStorage.getItem(SNAP_KEY));if(!s||!Array.isArray(s.pastos)||!s.pastos.length)return false;
+  Object.assign(D,s,{quando:s.quando?new Date(s.quando):null});return true;}catch(e){return false;}}
+const pareceOffline=e=>!navigator.onLine||/failed to fetch|networkerror|load failed|network request failed|fetch/i.test(String(e?.message||e));
 const lote=id=>D.lotes.find(l=>l.id===id)?.nome||"—";
 const pastoByN=n=>D.pastos.find(p=>p.numero===n);
 const ocup=n=>{const p=pastoByN(n);return p?D.mov.filter(m=>m.pasto_id===p.id&&!m.saida):[];};
@@ -445,9 +459,16 @@ document.getElementById("nav").addEventListener("click",e=>{const b=e.target.clo
 async function start(){
   document.getElementById("main").replaceChildren(h("div",{class:"intro"},h("p",{},"Carregando a posição…")));
   try{await carregar();}catch(e){
+    /* sem rede: abre com a última posição salva, deixando a vigência explícita */
+    if(pareceOffline(e)&&restaurarSnapshot()){
+      document.getElementById("pos-note").textContent="SEM CONEXÃO · última posição: "+(D.quando?D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"—");
+      document.getElementById("nav").hidden=false;
+      document.getElementById("appbar").replaceChildren(h("span",{class:"who"},D.email||""),
+        h("button",{class:"btn sm",type:"button",onclick:()=>location.reload()},"Reconectar"));
+      rerender();return;}
     document.getElementById("main").replaceChildren(h("div",{class:"intro"},h("h1",{},"Sem acesso aos dados"),
       h("p",{},"O banco respondeu, mas este e-mail não está na lista de usuários autorizados, ou a conexão falhou: "+(e?.message||e))));return;}
-  const{data:{user}}=await sb.auth.getUser();D.email=user?.email||null;
+  const{data:{user}}=await sb.auth.getUser();D.email=user?.email||null;salvarSnapshot();
   document.getElementById("pos-note").textContent="posição em "+D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
   document.getElementById("nav").hidden=false;
   document.getElementById("appbar").replaceChildren(
@@ -856,6 +877,10 @@ function relLinha(r,vigente){
 }
 
 (async()=>{const{data:{session}}=await sb.auth.getSession();session?start():loginView();})();
+
+/* ---------- PWA: service worker (abre offline com a última posição) ---------- */
+if("serviceWorker" in navigator&&(location.protocol==="https:"||["localhost","127.0.0.1"].includes(location.hostname)))
+  addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{});});
 </script>
 
 </body></html>
