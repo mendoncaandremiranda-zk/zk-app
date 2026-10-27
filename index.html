@@ -367,7 +367,7 @@ async function carregar(){
     q("inspecoes_agua","id,estrutura_id,data,funcionamento,limpeza,qualidade,obs,autor_email",["data",{ascending:false}]),
     q("abastecimentos_cocho","id,estrutura_id,data,alimento,quantidade_kg,obs,autor_email",["data",{ascending:false}]),
     q("solo_pastos","pasto_id,ano,camada,atributo,valor,unidade,metodo"),
-    q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs",["vigente_desde",{ascending:false}]),
+    q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs,criado_em",["vigente_desde",{ascending:false}]),
     q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}])]);
   Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],quando:new Date()});
   salvarSnapshot();
@@ -779,18 +779,37 @@ function viewPremissas(main){
   async function gravarAjuste(row,valor,desde,btn){
     if(!valor){btn.textContent="Informe o valor";return;}
     btn.disabled=true;btn.textContent="Gravando…";
-    const{error:e1}=await sb.from("premissas").update({vigente_ate:desde}).eq("id",row.id);
-    if(e1){btn.textContent="Falhou: "+e1.message;btn.disabled=false;return;}
-    const{error:e2}=await sb.from("premissas").insert({chave:row.chave,escopo:row.escopo,valor,unidade:row.unidade,vigente_desde:desde,autor_email:D.email});
-    if(e2){btn.textContent="Falhou: "+e2.message;btn.disabled=false;return;}
+    /* atômico no banco (fecha vigência + insere novo numa transação); autor vem do token de login */
+    const{error}=await sb.rpc("ajustar_premissa",{p_id:row.id,p_valor:valor,p_desde:desde});
+    if(error){btn.textContent="Falhou: "+error.message;btn.disabled=false;return;}
     await carregar();rerender();
   }
+  /* sucessor direto de uma premissa encerrada (mesma chave+escopo, começa onde a antiga terminou) */
+  const sucessora=p=>D.prem.filter(q=>q.id!==p.id&&q.chave===p.chave&&q.escopo===p.escopo&&q.vigente_desde===p.vigente_ate)
+    .sort((a,b)=>(a.criado_em||"")<(b.criado_em||"")?-1:1)
+    .find(q=>!p.criado_em||!q.criado_em||q.criado_em>=p.criado_em);
   const linhas=vig.map(p=>{
     const acao=h("td",{"data-l":""});
     const tr=h("tr",{},h("td",{"data-l":"Premissa"},premLabel(p)),h("td",{"data-l":"Escopo"},premEscopo(p.escopo)),
       h("td",{class:"n","data-l":"Valor"},premValor(p)),h("td",{class:"n","data-l":"Desde"},dmy(p.vigente_desde)),
       h("td",{"data-l":"Autor"},(p.autor_email||"").split("@")[0]),acao);
     const btn=h("button",{class:"btn sm",type:"button"},"Ajustar");
+    const btnEnc=h("button",{class:"btn sm",type:"button"},"Encerrar");
+    const acoes=h("div",{class:"inline-edit"},btn,btnEnc);
+    btnEnc.addEventListener("click",()=>{
+      /* remover = encerrar vigência sem substituta; nada é apagado, fica no histórico */
+      const ate=h("input",{type:"date",value:hoje});
+      const ok=h("button",{class:"btn pri sm",type:"button"},"Confirmar");
+      const volta=h("button",{class:"btn sm",type:"button",onclick:()=>acao.replaceChildren(acoes)},"Cancelar");
+      ok.addEventListener("click",async()=>{ok.disabled=true;ok.textContent="Gravando…";
+        const{error}=await sb.rpc("encerrar_premissa",{p_id:p.id,p_ate:ate.value});
+        if(error){ok.textContent="Falhou: "+error.message;ok.disabled=false;return;}
+        await carregar();rerender();});
+      acao.replaceChildren(h("div",{class:"ajuste"},
+        h("div",{class:"note"},"Sai das vigentes e fica no histórico — nada é apagado."),
+        h("label",{class:"f"},"Encerrar a partir de",ate),
+        h("div",{class:"inline-edit"},ok,volta)));
+    });
     btn.addEventListener("click",()=>{
       /* premissa de data edita com calendário no PRÓPRIO valor; número ganha teclado numérico */
       const ehData=p.unidade==="data"||/^\d{4}-\d{2}-\d{2}$/.test(p.valor);
@@ -799,14 +818,14 @@ function viewPremissas(main){
         :h("input",ehNumero?{inputmode:"decimal",value:p.valor}:{value:p.valor});
       const desde=h("input",{type:"date",value:hoje});
       const ok=h("button",{class:"btn pri sm",type:"button"},"Gravar");
-      const volta=h("button",{class:"btn sm",type:"button",onclick:()=>acao.replaceChildren(btn)},"Cancelar");
+      const volta=h("button",{class:"btn sm",type:"button",onclick:()=>acao.replaceChildren(acoes)},"Cancelar");
       ok.addEventListener("click",()=>gravarAjuste(p,valor.value.trim(),desde.value,ok));
       acao.replaceChildren(h("div",{class:"ajuste"},
         h("label",{class:"f"},"Novo valor",valor),
         h("label",{class:"f"},"Vale a partir de",desde),
         h("div",{class:"inline-edit"},ok,volta)));
     });
-    acao.append(btn);return tr;});
+    acao.append(acoes);return tr;});
   const chave=h("input",{placeholder:"chave (ex.: consumo_racao_kg_cab_dia)"});
   const escopo=h("input",{placeholder:"escopo: geral, cultivar:Marandu, pasto:2",value:"geral"});
   const valorN=h("input",{placeholder:"valor"});
@@ -823,8 +842,13 @@ function viewPremissas(main){
     h("div",{class:"tbl"},h("table",{class:"t-cards"},h("thead",{},h("tr",{},["Premissa","Escopo","Valor","Desde","Autor",""].map(x=>h("th",{},x)))),h("tbody",{},...linhas))),
     h("div",{class:"regform"},h("div",{class:"badge"},"Nova premissa"),h("div",{class:"grid2"},chave,escopo),h("div",{class:"grid2"},valorN,unidade),addBtn),
     h("div",{class:"badge",style:"margin-top:14px"},"Histórico",h("span",{class:"selo hist"},"Encerradas")),
-    hist.length?h("div",{class:"tbl"},h("table",{class:"t-cards"},h("thead",{},h("tr",{},["Premissa","Escopo","Valor","Vigência","Autor"].map(x=>h("th",{},x)))),
-      h("tbody",{},...hist.map(p=>h("tr",{},h("td",{"data-l":"Premissa"},premLabel(p)),h("td",{"data-l":"Escopo"},premEscopo(p.escopo)),h("td",{class:"n","data-l":"Valor"},premValor(p)),h("td",{class:"n","data-l":"Vigência"},dmy(p.vigente_desde)+" → "+dmy(p.vigente_ate)),h("td",{"data-l":"Autor"},(p.autor_email||"").split("@")[0])))))):
+    hist.length?h("div",{class:"tbl"},h("table",{class:"t-cards"},h("thead",{},h("tr",{},["Premissa","Escopo","Mudança","Vigência do valor anterior","Alterada por"].map(x=>h("th",{},x)))),
+      h("tbody",{},...hist.map(p=>{const seg=sucessora(p);
+        const enc=!seg&&/encerrada sem substituta por (\S+)/.exec(p.obs||"");
+        return h("tr",{},h("td",{"data-l":"Premissa"},premLabel(p)),h("td",{"data-l":"Escopo"},premEscopo(p.escopo)),
+          h("td",{class:"n","data-l":"Mudança"},premValor(p)+" → "+(seg?premValor(seg):(enc?"encerrada":"—"))),
+          h("td",{class:"n","data-l":"Vigência do valor anterior"},dmy(p.vigente_desde)+" → "+dmy(p.vigente_ate)),
+          h("td",{"data-l":"Alterada por"},seg?(seg.autor_email||"—").split("@")[0]:(enc?enc[1].split("@")[0]:"—")));})))):
       h("div",{class:"note"},"Sem ajustes ainda — quando uma premissa for alterada, o valor anterior aparece aqui.")));
 }
 
