@@ -969,11 +969,11 @@ function viewChuvas(main){
     h("p",{class:"note"},"Valores grandes = média dos pluviômetros; detalhe por ponto abaixo de cada um."),
     h("div",{class:"badge",style:"margin-top:14px"},"Chuva diária (mm) — últimos 60 dias"),leg,grafChuvaDiaria(ps,60),
     h("div",{class:"badge",style:"margin-top:14px"},"Acumulado no ano hidrológico (mm)"),leg.cloneNode(true),grafChuvaAcum(ps),
-    h("div",{style:"margin-top:14px"},regChuva(null)),
     h("div",{class:"badge",style:"margin-top:14px"},"Totais por mês"),
     linhasMes.length?h("div",{class:"tbl"},h("table",{},
       h("thead",{},h("tr",{},h("th",{},"Mês"),...ps.map(p=>h("th",{},nomeCurto(p))))),
       h("tbody",{},...linhasMes))):h("div",{class:"note"},"Sem leituras ainda."),
+    h("div",{style:"margin-top:14px"},regChuva(null)),
     h("div",{class:"badge",style:"margin-top:14px"},"Leituras recentes"),
     recentes.length?h("div",{},...recentes):h("div",{class:"note"},"Sem leituras ainda.")));
 }
