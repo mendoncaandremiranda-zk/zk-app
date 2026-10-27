@@ -200,8 +200,6 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:now
 /* ---- mapa com zoom próprio + ficha como tela no celular ---- */
 .map{position:relative;overflow:hidden}
 .map svg{transform-origin:0 0}
-.map-zoom{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:2}
-.map-zoom .btn{min-width:40px;padding-inline:8px;background:color-mix(in srgb,var(--surface) 88%,transparent)}
 @media (max-width:900px){
   .panel.aberta{position:fixed;inset:0;z-index:40;border:0;border-radius:0;overflow:auto;-webkit-overflow-scrolling:touch;
     background:var(--bg);padding:0 14px calc(24px + env(safe-area-inset-bottom,0px));animation:ficha-sobe .22s ease}
@@ -525,9 +523,9 @@ function ativarZoomMapa(cont,svg){
   });
   cont.addEventListener("pointerup",e=>{
     if(pts.has(e.pointerId)&&pts.size===1&&moveu<10){
-      /* duplo toque só no fundo do mapa (não rouba o toque de pastos/estruturas) */
+      /* duplo toque (dedo) só no fundo do mapa; mouse usa o dblclick nativo */
       const interativo=e.target.closest&&e.target.closest(".pasto,.estr,.hit,button");
-      if(!interativo){const agora=Date.now();
+      if(!interativo&&e.pointerType==="touch"){const agora=Date.now();
         if(agora-ultimoTap<320&&ultimoXY&&Math.hypot(e.clientX-ultimoXY[0],e.clientY-ultimoXY[1])<30){
           moveu=999;/* o clique sintético que segue o 2º toque não pode selecionar um pasto recém-ampliado */
           zoomAt(e.clientX,e.clientY,2);ultimoTap=0;/* duplo toque sempre aproxima; mapa inteiro = pinça p/ fora ou botão ⤢ */
@@ -536,14 +534,10 @@ function ativarZoomMapa(cont,svg){
     pts.delete(e.pointerId);if(pts.size<2)lastDist=0;});
   cont.addEventListener("pointercancel",e=>{pts.delete(e.pointerId);lastDist=0;});
   cont.addEventListener("dblclick",e=>{if(tipoPonteiro==="touch")return;/* no toque, o duplo toque já tratou */
-    if(!(e.target.closest&&e.target.closest(".pasto,.estr,.hit,button"))){e.preventDefault();zoomAt(e.clientX,e.clientY,2);}});
+    /* mouse (desktop, sem pinça): duplo clique alterna ampliar × mapa inteiro */
+    if(!(e.target.closest&&e.target.closest(".pasto,.estr,.hit,button"))){e.preventDefault();zoomAt(e.clientX,e.clientY,sc>1?0:2);}});
   /* arrastou/pinçou/deu duplo toque => o clique que se segue não seleciona nada (consome uma vez) */
   cont.addEventListener("click",e=>{if(moveu>10){e.stopPropagation();e.preventDefault();moveu=0;}},true);
-  const bz=(t,f,lbl)=>h("button",{class:"btn sm",type:"button","aria-label":lbl,onclick:f},t);
-  cont.append(h("div",{class:"map-zoom"},
-    bz("−",()=>{const r=cont.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.4);},"Afastar"),
-    bz("+",()=>{const r=cont.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.4);},"Aproximar"),
-    bz("⤢",()=>{sc=1;tx=0;ty=0;aplica();},"Mapa inteiro")));
   aplica();
 }
 
