@@ -197,6 +197,20 @@ th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertic
 th{font-family:var(--f-mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--soft);white-space:nowrap}
 tr:last-child td{border-bottom:0}
 td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+/* ---- mapa com zoom próprio + ficha como tela no celular ---- */
+.map{position:relative;overflow:hidden}
+.map svg{transform-origin:0 0}
+.map-zoom{position:absolute;top:8px;right:8px;display:flex;gap:6px;z-index:2}
+.map-zoom .btn{min-width:40px;padding-inline:8px;background:color-mix(in srgb,var(--surface) 88%,transparent)}
+@media (max-width:900px){
+  .panel.aberta{position:fixed;inset:0;z-index:40;border:0;border-radius:0;overflow:auto;-webkit-overflow-scrolling:touch;
+    background:var(--bg);padding:0 14px calc(24px + env(safe-area-inset-bottom,0px));animation:ficha-sobe .22s ease}
+  .panel.aberta .ficha-top{position:sticky;top:0;z-index:3;background:var(--bg);display:grid;gap:8px;
+    padding:max(12px,env(safe-area-inset-top,0px)) 0 10px;border-bottom:1px solid var(--line);margin:0 0 10px}
+  body.ficha-aberta{overflow:hidden}
+}
+@keyframes ficha-sobe{from{transform:translateY(26px);opacity:.5}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.panel.aberta{animation:none}}
 /* ---- toque (celular/tablet): teclado sem zoom automático e alvos >=44px ---- */
 @media (pointer:coarse){
   input[type=text],input[type=date],input[type=number],input[type=email],input[type=password],input:not([type]),textarea,select{font-size:16px;min-height:44px}
@@ -485,6 +499,54 @@ async function start(){
   rerender();
 }
 
+/* ---------- zoom do mapa: pinça, duplo toque no fundo, arrastar quando ampliado; botões como garantia.
+   Com o zoom próprio, ninguém precisa dar zoom na PÁGINA para acertar um cocho — o gesto sobre o mapa
+   não dispara o zoom do navegador (touch-action controlado) e a interface em volta fica no tamanho normal. */
+function ativarZoomMapa(cont,svg){
+  let sc=1,tx=0,ty=0,moveu=0,ultimoTap=0,ultimoXY=null;
+  const aplica=()=>{const w=cont.clientWidth,hh=cont.clientHeight;
+    tx=Math.min(0,Math.max(w-w*sc,tx));ty=Math.min(0,Math.max(hh-hh*sc,ty));
+    svg.style.transform=sc===1?"":`translate(${tx}px,${ty}px) scale(${sc})`;
+    cont.style.touchAction=sc===1?"pan-y":"none";};
+  const zoomAt=(cx,cy,f)=>{const r=cont.getBoundingClientRect();const x=cx-r.left,y=cy-r.top;
+    const ns=Math.min(8,Math.max(1,sc*f));
+    tx=x-(x-tx)*(ns/sc);ty=y-(y-ty)*(ns/sc);sc=ns;if(sc===1){tx=0;ty=0;}aplica();};
+  const pts=new Map();let lastDist=0,tipoPonteiro="";
+  cont.addEventListener("pointerdown",e=>{tipoPonteiro=e.pointerType;pts.set(e.pointerId,[e.clientX,e.clientY]);moveu=0;if(pts.size===2)lastDist=0;});
+  cont.addEventListener("pointermove",e=>{
+    if(!pts.has(e.pointerId))return;
+    const prev=pts.get(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);
+    moveu+=Math.hypot(e.clientX-prev[0],e.clientY-prev[1]);
+    if(pts.size===2){const a=[...pts.values()];
+      const d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);
+      const cx=(a[0][0]+a[1][0])/2,cy=(a[0][1]+a[1][1])/2;
+      if(lastDist>0)zoomAt(cx,cy,d/lastDist);lastDist=d;e.preventDefault();}
+    else if(pts.size===1&&sc>1){tx+=e.clientX-prev[0];ty+=e.clientY-prev[1];aplica();e.preventDefault();}
+  });
+  cont.addEventListener("pointerup",e=>{
+    if(pts.has(e.pointerId)&&pts.size===1&&moveu<10){
+      /* duplo toque só no fundo do mapa (não rouba o toque de pastos/estruturas) */
+      const interativo=e.target.closest&&e.target.closest(".pasto,.estr,.hit,button");
+      if(!interativo){const agora=Date.now();
+        if(agora-ultimoTap<320&&ultimoXY&&Math.hypot(e.clientX-ultimoXY[0],e.clientY-ultimoXY[1])<30){
+          moveu=999;/* o clique sintético que segue o 2º toque não pode selecionar um pasto recém-ampliado */
+          zoomAt(e.clientX,e.clientY,2);ultimoTap=0;/* duplo toque sempre aproxima; mapa inteiro = pinça p/ fora ou botão ⤢ */
+        }else{ultimoTap=agora;ultimoXY=[e.clientX,e.clientY];}}
+    }
+    pts.delete(e.pointerId);if(pts.size<2)lastDist=0;});
+  cont.addEventListener("pointercancel",e=>{pts.delete(e.pointerId);lastDist=0;});
+  cont.addEventListener("dblclick",e=>{if(tipoPonteiro==="touch")return;/* no toque, o duplo toque já tratou */
+    if(!(e.target.closest&&e.target.closest(".pasto,.estr,.hit,button"))){e.preventDefault();zoomAt(e.clientX,e.clientY,2);}});
+  /* arrastou/pinçou/deu duplo toque => o clique que se segue não seleciona nada (consome uma vez) */
+  cont.addEventListener("click",e=>{if(moveu>10){e.stopPropagation();e.preventDefault();moveu=0;}},true);
+  const bz=(t,f,lbl)=>h("button",{class:"btn sm",type:"button","aria-label":lbl,onclick:f},t);
+  cont.append(h("div",{class:"map-zoom"},
+    bz("−",()=>{const r=cont.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.4);},"Afastar"),
+    bz("+",()=>{const r=cont.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.4);},"Aproximar"),
+    bz("⤢",()=>{sc=1;tx=0;ty=0;aplica();},"Mapa inteiro")));
+  aplica();
+}
+
 /* ---------- vista: mapa ---------- */
 function viewMapa(main){
   const svg=s_("svg",{viewBox:`0 0 ${MAP.w} ${MAP.h}`,role:"group","aria-label":"Mapa da Chácara ZK"});
@@ -507,8 +569,10 @@ function viewMapa(main){
     if(st.cx!=null){const hit=s_("circle",{cx:st.cx,cy:st.cy,r:20,class:"hit"});hit.addEventListener("click",go);svg.append(hit);}});
   MAP.pastos.forEach(p=>{const t=s_("text",{x:p.lx,y:p.ly,"text-anchor":"middle"});t.textContent=p.n===10?"P10":p.nome;svg.append(t);
     const o=ocup(p.n);if(o.length){const t2=s_("text",{x:p.lx,y:p.ly+16,"text-anchor":"middle",class:"sm"});t2.textContent=o.map(m=>lote(m.lote_id)+" · "+m.cabecas+" cab").join(" + ");svg.append(t2);}});
+  const mapDiv=h("div",{class:"map"},svg);
+  ativarZoomMapa(mapDiv,svg);
   main.replaceChildren(h("section",{class:"card"},h("div",{class:"mapwrap"},
-    h("div",{},h("div",{class:"map"},svg),
+    h("div",{},mapDiv,
       h("div",{class:"legend"},h("span",{},h("i",{style:"background:color-mix(in srgb,var(--accent) 22%,var(--surface))"}),"Pasto ocupado"),h("span",{},h("i",{style:"background:var(--surface)"}),"Pasto vazio"),h("span",{},h("i",{style:"background:repeating-linear-gradient(45deg,var(--line) 0 1px,transparent 1px 5px)"}),"Remanescente"),
         h("span",{},legSwatch("ponto_agua"),"Ponto de Água"),h("span",{},legSwatch("cocho"),"Cocho"),
         h("span",{},legSwatch("estoque"),"Barracão de Estoque"),h("span",{},legSwatch("maquinas"),"Barracão de Máquinas"),
@@ -518,7 +582,8 @@ function viewMapa(main){
 }
 
 /* ---------- ficha do pasto em abas ---------- */
-/* Em tela estreita a ficha abre abaixo do mapa+legenda; rola até ela quando estiver fora de vista. */
+/* Em tela estreita a ficha abre como TELA própria por cima do mapa (overlay); fechar volta ao mapa
+   exatamente como estava. Em tela larga mantém o painel ao lado, rolando até ele se estiver fora de vista. */
 function revelarPainel(pn){
   const topo=document.querySelector(".top");
   const aTopo=topo?topo.getBoundingClientRect().height:0;
@@ -527,10 +592,19 @@ function revelarPainel(pn){
     window.scrollTo({top:Math.max(0,window.scrollY+r.top-aTopo-8),behavior:"smooth"});
   }
 }
+function mostrarFicha(pn){
+  if(window.matchMedia("(max-width:900px)").matches){
+    pn.classList.add("aberta");document.body.classList.add("ficha-aberta");pn.scrollTop=0;
+  }else{
+    pn.classList.remove("aberta");document.body.classList.remove("ficha-aberta");revelarPainel(pn);
+  }
+}
 function clearSel(){selN=null;selEstrId=null;
   document.querySelectorAll(".map .pasto").forEach(e=>e.classList.remove("sel"));
   document.querySelectorAll(".map .estr").forEach(e=>e.classList.remove("sel"));
+  document.body.classList.remove("ficha-aberta");
   const pn=document.getElementById("panel");
+  if(pn)pn.classList.remove("aberta");
   if(pn)pn.replaceChildren(h("div",{class:"badge"},"Ficha"),h("h3",{},"Chácara ZK"),
     h("div",{class:"note"},"Toque num pasto ou numa estrutura do mapa para abrir a ficha correspondente."));}
 const ABAS=[["pasto","Pasto"],["manejos","Manejos"],["agua_cocho","Água & Cocho"],["solo","Solo & Fertilidade"],["desempenho","Desempenho"]];
@@ -634,10 +708,10 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
     if(hist.length)corpo.push(h("div",{class:"badge"},"Ocupações encerradas",h("span",{class:"selo hist"},"Histórico")),
       ...hist.map(m=>h("div",{class:"ev"},h("span",{class:"d"},dmy(m.entrada)+" → "+dmy(m.saida)+" · "),lote(m.lote_id)+" · "+m.cabecas+" cab")));
   }
-  const kidsP=[tabs,h("div",{class:"ph"},h("h3",{},p.nome),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar")),...corpo,
+  const kidsP=[h("div",{class:"ficha-top"},tabs,h("div",{class:"ph"},h("h3",{},p.nome),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar"))),...corpo,
     (painelTab==="solo"||painelTab==="agua_cocho")?null:fotoStrip("pasto",p.id,painelTab)].filter(Boolean);
   pn.replaceChildren(...kidsP);
-  revelarPainel(pn);
+  mostrarFicha(pn);
 }
 const mapIdByNome=nome=>(MAP.estruturas||[]).find(s=>s.nome===nome)?.id;
 
@@ -650,7 +724,7 @@ function selEstrutura(id){selEstrId=id;selN=null;
   const tipos={estoque:"Estoque",maquinas:"Máquinas",aves:"Aves",suinos:"Suínos",ponto_agua:"Ponto de Água",cocho:"Cocho"};
   const vinc=reg?D.eplinks.filter(l=>l.estrutura_id===reg.id).map(l=>D.pastos.find(p=>p.id===l.pasto_id)):[];
   const vp=vinc[0];
-  const corpo=[h("div",{class:"ph"},h("div",{class:"badge"},"Ficha da estrutura"),vp?h("button",{class:"btn sm",type:"button",onclick:()=>selPasto(vp.numero,"agua_cocho")},"← "+vp.nome):h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar")),h("h3",{},st.nome),
+  const corpo=[h("div",{class:"ficha-top"},h("div",{class:"ph"},h("div",{class:"badge"},"Ficha da estrutura"),vp?h("button",{class:"btn sm",type:"button",onclick:()=>selPasto(vp.numero,"agua_cocho")},"← "+vp.nome):h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar")),h("h3",{},st.nome)),
     h("dl",{class:"kv"},h("dt",{},"Tipo"),h("dd",{},tipos[reg?.tipo||st.tipo]||"—"),...(vinc.length?[h("dt",{},"Pasto"),h("dd",{},vinc.map(p=>p?.nome).join(", "))]:[])),
     reg?.obs?h("div",{class:"note"},reg.obs):null];
   if(reg&&reg.tipo==="ponto_agua"){
@@ -674,7 +748,7 @@ function selEstrutura(id){selEstrId=id;selN=null;
     corpo.push(h("div",{class:"note"},reg.tipo==="estoque"?"Saldo por insumo, movimentações e autonomia entram na carga do estoque (próximo passo).":"Cadastro da frota, manutenções, consumo e operações entram no próximo passo."));
   const kids=[...corpo,reg?fotoStrip("estrutura",reg.id,null):null].filter(Boolean);
   pn.replaceChildren(...kids);
-  revelarPainel(pn);
+  mostrarFicha(pn);
 }
 function regInspecao(eid){
   const f={funcionamento:true,limpeza:true,qualidade:true};
