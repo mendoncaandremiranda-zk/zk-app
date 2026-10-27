@@ -1285,26 +1285,10 @@ function viewSimulador(main){
 
 /* ---------- vista: relatórios ---------- */
 function viewRelatorios(main){
-  const vig=D.mov.filter(m=>!m.saida);const cab=vig.reduce((s,m)=>s+m.cabecas,0);
-  const seteDias=Date.now()-7*86400000;
-  const evSem=[...D.evReb.filter(e=>e.status!=="programado"&&new Date(e.data)>=seteDias).map(e=>({...e,src:"rebanho"})),
-    ...D.evPas.filter(e=>e.status!=="programado"&&new Date(e.data)>=seteDias).map(e=>({...e,src:"pastagem"})),
-    ...D.abast.filter(a=>new Date(a.data)>=seteDias).map(a=>({data:a.data,tipo:"abastecimento",produto:a.alimento,dose:a.quantidade_kg?nf(a.quantidade_kg,0)+" kg":null,src:"cocho"})),
-    ...D.insp.filter(i=>new Date(i.data)>=seteDias).map(i=>({data:i.data,tipo:"inspeção de água",produto:null,src:"água"}))].sort((a,b)=>b.data<a.data?-1:1);
-  const prog=[...D.evReb,...D.evPas].filter(e=>e.status==="programado").sort((a,b)=>a.data<b.data?-1:1);
+  /* aba de relatórios: hoje só a Posição Semanal; novos relatórios entram aqui como novos blocos */
   main.replaceChildren(h("section",{class:"card"},
-    h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Relatório semanal — visão viva"),
-    h("p",{class:"note"},"Posição em "+D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})+" · gerado do banco nesta abertura"),
-    h("div",{class:"badge"},"Ocupação vigente"),
-    h("div",{class:"tbl"},h("table",{},h("thead",{},h("tr",{},["Pasto","Lote","Cabeças","Entrada","Dias","cab/ha"].map(x=>h("th",{},x)))),
-      h("tbody",{},...vig.map(m=>{const p=D.pastos.find(x=>x.id===m.pasto_id);const dias=Math.max(0,Math.round((Date.now()-new Date(m.entrada))/86400000));
-        return h("tr",{},h("td",{},p?.nome||"—"),h("td",{},lote(m.lote_id)),h("td",{class:"n"},String(m.cabecas)),h("td",{class:"n"},dmy(m.entrada)),h("td",{class:"n"},String(dias)),h("td",{class:"n"},nf(m.cabecas/(p?.area_oficial_ha||1),1)));}),
-        h("tr",{},h("td",{},h("strong",{},"Total")),h("td",{}),h("td",{class:"n"},h("strong",{},String(cab))),h("td",{}),h("td",{}),h("td",{}))))),
-    h("div",{class:"badge",style:"margin-top:10px"},"Acontecimentos dos últimos 7 dias"),
-    evSem.length?h("div",{},...evSem.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "+e.src+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":"")))):h("div",{class:"note"},"Sem registros na semana."),
-    h("div",{class:"badge",style:"margin-top:10px"},"Programado",h("span",{class:"selo prog"},"Projeção")),
-    prog.length?h("div",{},...prog.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.obs?" — "+e.obs:"")))):h("div",{class:"note"},"Nada programado."),
-    h("div",{class:"badge",style:"margin-top:12px"},"Posição Semanal"),
+    h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 10px"},"Relatórios"),
+    h("div",{class:"badge"},"Posição Semanal"),
     D.rel.length?h("div",{},
       relLinha(D.rel[0],true),
       D.rel.length>1?h("details",{class:"pasta-rel"},
