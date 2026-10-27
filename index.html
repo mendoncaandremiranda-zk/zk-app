@@ -119,6 +119,12 @@ pre.md{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;background:
 .nav[hidden]{display:none}
 .nav button[hidden]{display:none}
 .regform [hidden],.regform .grid2[hidden]{display:none!important}
+details.consulta{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px 12px;margin-bottom:10px}
+details.consulta summary{cursor:pointer;font:600 15px var(--f-body);padding:11px 0;list-style:none;min-height:24px}
+details.consulta summary::-webkit-details-marker{display:none}
+details.consulta summary::before{content:"▸ ";color:var(--accent)}
+details.consulta[open] summary::before{content:"▾ "}
+details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .regform label.f{display:grid;gap:4px;font-size:12px;font-weight:600;color:var(--muted)}
 .ajuste{display:grid;gap:8px;max-width:240px}
 .ajuste label.f{display:grid;gap:3px;font-size:12px;font-weight:600;color:var(--muted)}
@@ -247,9 +253,10 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:now
     <nav class="nav" id="nav" hidden>
       <button data-v="mapa" aria-selected="true">Mapa</button>
       <button data-v="indicadores" aria-selected="false">Indicadores</button>
-      <button data-v="simulador" aria-selected="false">Simulador</button>
-      <button data-v="relatorios" aria-selected="false">Relatórios</button>
-      <button data-v="premissas" aria-selected="false">Premissas</button>
+      <button data-v="consultas" aria-selected="false" hidden>Consultas</button>
+      <button data-v="simulador" aria-selected="false" hidden>Simulador</button>
+      <button data-v="relatorios" aria-selected="false" hidden>Relatórios</button>
+      <button data-v="premissas" aria-selected="false" hidden>Premissas</button>
     </nav>
     <div class="appbar" id="appbar"></div>
   </div>
@@ -379,10 +386,14 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],quando:null,email:null,admin:false};
-/* Premissas são item de administração: o menu só aparece para papel 'administrador'
-   (a escrita é barrada também no banco — políticas em db/12_papel_administrador.sql). */
-function aplicarPapel(){const b=document.querySelector('#nav button[data-v="premissas"]');if(b)b.hidden=!D.admin;}
+const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+/* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
+   Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
+   O banco garante por RLS; aqui só se decide o que aparece na tela. */
+function aplicarPapel(){
+  const vis={premissas:D.admin,consultas:D.socio,simulador:D.socio,relatorios:D.socio};
+  document.querySelectorAll("#nav button").forEach(b=>{if(b.dataset.v in vis)b.hidden=!vis[b.dataset.v];});
+}
 async function carregar(){
   const q=async (t,sel,ord)=>{let qq=sb.from(t).select(sel);if(ord)qq=qq.order(...ord);const{data,error}=await qq;if(error)throw new Error(t+": "+error.message);return data||[];};
   const r=await Promise.all([
@@ -496,10 +507,12 @@ async function salvarAltura(movId,campo,valor){
 let VIEW="mapa",selN=null,selEstrId=null,painelTab="pasto";
 function rerender(){
   if(VIEW==="premissas"&&!D.admin)VIEW="mapa";
+  if((VIEW==="simulador"||VIEW==="relatorios"||VIEW==="consultas")&&!D.socio)VIEW="mapa";
   document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.v===VIEW)));
   const m=document.getElementById("main");
   if(VIEW==="mapa")viewMapa(m);
   else if(VIEW==="indicadores")viewIndicadores(m);
+  else if(VIEW==="consultas")viewConsultas(m);
   else if(VIEW==="simulador")viewSimulador(m);
   else if(VIEW==="premissas")viewPremissas(m);
   else viewRelatorios(m);
@@ -519,7 +532,8 @@ async function start(){
     document.getElementById("main").replaceChildren(h("div",{class:"intro"},h("h1",{},"Sem acesso aos dados"),
       h("p",{},"O banco respondeu, mas este e-mail não está na lista de usuários autorizados, ou a conexão falhou: "+(e?.message||e))));return;}
   const{data:{user}}=await sb.auth.getUser();D.email=user?.email||null;
-  try{const{data:adm}=await sb.rpc("app_admin");D.admin=adm===true;}catch(e){D.admin=false;}
+  try{const{data:pap}=await sb.rpc("papel_atual");D.papel=pap||"usuario";}catch(e){D.papel="usuario";}
+  D.admin=D.papel==="administrador";D.socio=D.admin||D.papel==="socio";
   aplicarPapel();salvarSnapshot();
   document.getElementById("pos-note").textContent="posição em "+D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
   document.getElementById("nav").hidden=false;
@@ -928,12 +942,144 @@ function viewIndicadores(main){
     h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"),
     h("div",{class:"kpis"},
       kpi(String(cab),"Cabeças vigentes",vig.map(m=>lote(m.lote_id)+" "+m.cabecas).join(" · ")),
-      kpi(String(dias),"Dias até a venda prevista",dmy(V.data)+" · preço-alvo R$ "+nf(V.alvo,0)+"/cab"),
+      kpi(String(dias),"Dias até a venda prevista",dmy(V.data)+(D.socio?" · preço-alvo R$ "+nf(V.alvo,0)+"/cab":"")),
       kpi(nf(areaOc?cab/areaOc:0,1),"Lotação dos pastos ocupados (cab/ha)",nf(areaOc?UA(cab)/areaOc:0,2)+" UA/ha · ref. 0,75 UA/cab"),
       kpi(d7.length?nf(kg7/7/cab,2):"—","Consumo registrado (kg/cab/dia, 7 dias)",d7.length?nf(kg7,0)+" kg na semana":"sem apontamentos de Cocho ainda"),
       kpi(String(probAgua),"Pontos de Água com pendência",D.insp.length?"última inspeção por ponto":"sem inspeções registradas ainda"),
       kpi("—","Autonomia do estoque","entra com a carga do estoque"),
-      kpi("—","Custo acumulado por cabeça","entra com a integração com o modelo"))));
+      D.socio?kpi("—","Custo acumulado por cabeça","entra com a integração com o modelo"):null)));
+}
+
+/* ---------- vista: consultas sob demanda (sócios) ----------
+   Respostas instantâneas calculadas da posição já carregada — sem depender de relatório pronto. */
+function viewConsultas(main){
+  const hoje=Date.now();
+  const vig=D.mov.filter(m=>!m.saida);
+  const cabTot=vig.reduce((s,m)=>s+m.cabecas,0);
+  const pastoDe=m=>D.pastos.find(p=>p.id===m.pasto_id);
+  const cvDe=p=>D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27")?.cultivar||null;
+  const tbl=(cols,linhas)=>h("div",{class:"tbl"},h("table",{},h("thead",{},h("tr",{},cols.map(c=>h("th",{},c)))),h("tbody",{},...linhas)));
+  const bloco=(titulo,...corpo)=>h("details",{class:"consulta"},h("summary",{},titulo),h("div",{class:"c-corpo"},...corpo.flat().filter(Boolean)));
+
+  /* 1 — posição do rebanho */
+  const posRows=vig.map(m=>{const p=pastoDe(m);const dias=Math.max(0,Math.round((hoje-new Date(m.entrada))/86400000));
+    return h("tr",{},h("td",{},lote(m.lote_id)),h("td",{},p?.nome||"—"),h("td",{class:"n"},String(m.cabecas)),
+      h("td",{class:"n"},dmy(m.entrada)),h("td",{class:"n"},String(dias)),
+      h("td",{class:"n"},p?nf(m.cabecas/p.area_oficial_ha,1):"—"),h("td",{class:"n"},p?nf(UA(m.cabecas)/p.area_oficial_ha,2):"—"));});
+  const b1=bloco("1 · Posição do rebanho agora",
+    tbl(["Lote","Pasto","Cab","Entrada","Dias","cab/ha","UA/ha"],posRows),
+    h("div",{class:"note"},"Total: "+cabTot+" cabeças em "+vig.length+" pasto(s)."));
+
+  /* 2 — prontidão de pastos (descanso × meta) */
+  const prontRows=D.pastos.map(p=>{
+    const oc=vig.find(m=>m.pasto_id===p.id);
+    const cv=cvDe(p);
+    const meta=premNum("dias_descanso_meta",["pasto:"+p.numero,"cultivar:"+(cv||""),"geral"],null);
+    const pcell=h("td",{},p.nome,cv?h("div",{style:"font-size:11px;color:var(--muted)"},cv):null);
+    const mtxt=meta!=null?nf(meta,0):"—";
+    if(oc)return h("tr",{},pcell,h("td",{class:"n"},"— / "+mtxt),h("td",{},"ocupado · "+lote(oc.lote_id)));
+    const saidas=D.mov.filter(m=>m.pasto_id===p.id&&m.saida).map(m=>m.saida).sort();
+    const ult=saidas[saidas.length-1];
+    const desc=ult?Math.max(0,Math.round((hoje-new Date(ult))/86400000)):null;
+    const status=desc==null?"sem ocupação anterior":meta==null?"sem meta de descanso":(desc>=meta?h("span",{class:"selo vig"},"PRONTO"):"faltam "+nf(meta-desc,0)+" dias");
+    return h("tr",{},pcell,h("td",{class:"n"},(desc!=null?String(desc):"—")+" / "+mtxt),h("td",{},status));});
+  const b2=bloco("2 · Prontidão de pastos (descanso × meta)",
+    tbl(["Pasto","Desc./meta (dias)","Situação"],prontRows),
+    h("div",{class:"note"},"Meta vem da premissa \"Dias de descanso da pastagem\" (pasto → cultivar → geral)."));
+
+  /* 3 — linha do tempo de um lote */
+  const selLote=h("select",{},...D.lotes.map(l=>h("option",{value:l.id},l.nome)));
+  const tl=h("div",{});
+  const desenhaTL=()=>{const lid=selLote.value;
+    const movs=D.mov.filter(m=>m.lote_id===lid);
+    const evs=D.evReb.filter(e=>e.lote_id===lid||e.lote_id==null);
+    tl.replaceChildren(
+      h("div",{class:"badge"},"Ocupações"),
+      ...(movs.length?movs.map(m=>{const p=pastoDe(m);
+        return h("div",{class:"ev"},h("span",{class:"d"},dmy(m.entrada)+(m.saida?" → "+dmy(m.saida):" → vigente")+" · "),
+          (p?.nome||"—")+" · "+m.cabecas+" cab",
+          h("div",{class:"d"},"altura entrada "+(m.altura_entrada_cm!=null?nf(m.altura_entrada_cm,0)+" cm":"a apontar")+" · saída "+(m.altura_saida_cm!=null?nf(m.altura_saida_cm,0)+" cm":"—")));}):[h("div",{class:"note"},"Sem ocupações.")]),
+      h("div",{class:"badge"},"Manejos"),
+      ...(evs.length?evs.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:""),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado"))):[h("div",{class:"note"},"Sem manejos.")]));};
+  selLote.addEventListener("change",desenhaTL);
+  const b3=bloco("3 · Linha do tempo de um lote",h("label",{class:"f"},"Lote",selLote),tl);
+
+  /* 4 — consumo e custo de suplementação */
+  const selPer=h("select",{},...[7,14,30].map(d=>h("option",{value:String(d)},"últimos "+d+" dias")));
+  const cons=h("div",{});
+  const desenhaCons=()=>{const dd=Number(selPer.value);
+    const corte=hoje-dd*86400000;
+    const abs=D.abast.filter(a=>a.quantidade_kg&&new Date(a.data)>=corte);
+    const kg=abs.reduce((s,a)=>s+Number(a.quantidade_kg),0);
+    const porE={};abs.forEach(a=>{const e=D.estr.find(x=>x.id===a.estrutura_id);const n=e?.nome||"—";porE[n]=(porE[n]||0)+Number(a.quantidade_kg);});
+    const custoKg=premNum("custo_racao_r_kg",["geral"],null);
+    cons.replaceChildren(...[
+      h("dl",{class:"kv"},
+        h("dt",{},"Total no período"),h("dd",{},nf(kg,0)+" kg"),
+        h("dt",{},"Consumo"),h("dd",{},cabTot?nf(kg/dd/cabTot,2)+" kg/cab/dia":"—"),
+        ...(custoKg!=null?[h("dt",{},"Custo"),h("dd",{},"R$ "+nf(kg*custoKg,0)+" no período · R$ "+(cabTot?nf(kg*custoKg/dd/cabTot,2):"—")+"/cab/dia")]:[])),
+      Object.keys(porE).length?h("div",{},h("div",{class:"badge"},"Por cocho"),...Object.entries(porE).map(([n,v])=>h("div",{class:"ev"},n+" · "+nf(v,0)+" kg"))):h("div",{class:"note"},"Sem abastecimentos no período."),
+      custoKg==null?h("div",{class:"note"},"Cadastre a premissa \"Custo da ração\" para ver o custo."):null].filter(Boolean));};
+  selPer.addEventListener("change",desenhaCons);
+  const b4=bloco("4 · Consumo e custo de suplementação",h("label",{class:"f"},"Período",selPer),cons);
+
+  /* 5 — projeção de venda com sensibilidade */
+  const V=VENDA();
+  const diasV=Math.ceil((new Date(V.data)-hoje)/86400000);
+  const sensRows=[-100,0,100].map(dp=>{const pr=V.alvo+dp;
+    return h("tr",dp===0?{style:"font-weight:700"}:{},h("td",{class:"n"},"R$ "+nf(pr,0)+"/cab"+(dp===0?" (alvo)":"")),h("td",{class:"n"},"R$ "+nf(pr*cabTot,0)));});
+  const b5=bloco("5 · Projeção de venda (sensibilidade de preço)",
+    h("div",{class:"note"},cabTot+" cab · venda prevista "+dmy(V.data)+" ("+Math.max(0,diasV)+" dias) ",h("span",{class:"selo prog"},"Projeção")),
+    tbl(["Preço","Receita"],sensRows));
+
+  /* 6 — agenda 30 dias */
+  const lim=hoje+30*86400000;
+  const agItens=[
+    ...D.evReb.filter(e=>e.status==="programado").map(e=>({data:e.data,txt:e.tipo+(e.produto?" — "+e.produto:""),alvo:e.lote_id?lote(e.lote_id):"rebanho todo"})),
+    ...D.evPas.filter(e=>e.status==="programado").map(e=>({data:e.data,txt:e.tipo+(e.produto?" — "+e.produto:""),alvo:D.pastos.find(p=>p.id===e.pasto_id)?.nome||"—"}))]
+    .filter(i=>new Date(i.data)<=lim).sort((a,b)=>a.data<b.data?-1:1);
+  const b6=bloco("6 · Agenda — programados nos próximos 30 dias",
+    agItens.length?agItens.map(i=>h("div",{class:"ev"},h("span",{class:"d"},dmy(i.data)+" · "),i.txt+" · "+i.alvo)):h("div",{class:"note"},"Nada programado para os próximos 30 dias."));
+
+  /* 7 — conformidade de água */
+  const aguaRows=D.estr.filter(e=>e.tipo==="ponto_agua").map(e=>{
+    const ins=D.insp.filter(i=>i.estrutura_id===e.id)[0];
+    const dias=ins?Math.round((hoje-new Date(ins.data))/86400000):null;
+    const ok=ins?(ins.funcionamento&&ins.limpeza&&ins.qualidade):null;
+    return h("tr",{},h("td",{},e.nome),h("td",{class:"n"},ins?dmy(ins.data):"—"),h("td",{class:"n"},dias!=null?String(dias):"—"),
+      h("td",{},ins?h("span",{class:"selo "+(ok?"vig":"bad")},ok?"OK":"Pendência"):h("span",{class:"selo hist"},"Sem inspeção")));});
+  const b7=bloco("7 · Conformidade dos pontos de água",tbl(["Ponto","Última insp.","Dias","Situação"],aguaRows));
+
+  /* 8 — fertilidade comparativa (0-20 cm) */
+  const fert=D.pastos.map(p=>{const sp=D.solo.filter(x=>x.pasto_id===p.id&&x.camada==="0-20");
+    if(!sp.length)return null;const g=k=>{const r=sp.find(x=>x.atributo===k);return r?Number(r.valor):null;};
+    return {nome:p.nome,v:g("v"),ph:g("ph"),p:g("p_meh"),k:g("k"),mo:g("mo")};}).filter(Boolean)
+    .sort((a,b)=>(b.v??-1)-(a.v??-1));
+  const b8=bloco("8 · Fertilidade comparativa (0-20 cm, ordenado por V%)",
+    fert.length?tbl(["Pasto","V%","pH","P","K","MO"],fert.map(f=>h("tr",{},h("td",{},f.nome),
+      ...[f.v,f.ph,f.p,f.k,f.mo].map(v=>h("td",{class:"n"},v!=null?nf(v,v<10?2:0):"—"))))):h("div",{class:"note"},"Sem fertilidade interpolada cadastrada."));
+
+  /* 9 — resumo para WhatsApp (operacional, sem valores financeiros) */
+  const resumoTxt=()=>{
+    const pos=vig.map(m=>{const p=pastoDe(m);return lote(m.lote_id)+" "+m.cabecas+" cab no "+(p?.nome||"—");}).join("; ");
+    const pend=aguaRows.length?D.estr.filter(e=>e.tipo==="ponto_agua").filter(e=>{const i=D.insp.filter(x=>x.estrutura_id===e.id)[0];return !i||!(i.funcionamento&&i.limpeza&&i.qualidade);}).length:0;
+    const ag=agItens.slice(0,4).map(i=>dmy(i.data)+" "+i.txt).join("; ");
+    return "*Chácara ZK — posição "+(D.quando?D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"")+"*\n"
+      +"Rebanho: "+cabTot+" cab ("+pos+")\n"
+      +"Água: "+(pend?pend+" ponto(s) com pendência":"sem pendências")+"\n"
+      +(ag?"Agenda: "+ag:"Agenda: nada programado em 30 dias");};
+  const pre=h("pre",{class:"md"},resumoTxt());
+  const btnCop=h("button",{class:"btn sm",type:"button",onclick:async()=>{try{await navigator.clipboard.writeText(resumoTxt());btnCop.textContent="Copiado ✓";}catch(e){btnCop.textContent="Selecione e copie do quadro";}}},"Copiar");
+  const btnComp=(navigator.share?h("button",{class:"btn sm",type:"button",onclick:()=>navigator.share({text:resumoTxt()}).catch(()=>{})},"Compartilhar"):null);
+  const b9=bloco("9 · Resumo para WhatsApp",
+    h("div",{class:"note"},"Texto operacional, sem valores financeiros — seguro para encaminhar."),
+    pre,h("div",{class:"inline-edit"},btnCop,btnComp));
+
+  main.replaceChildren(h("section",{class:"card"},
+    h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Consultas",h("span",{class:"selo vig"},"Posição vigente")),
+    h("p",{class:"note"},"Respostas instantâneas calculadas da posição em "+(D.quando?D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"—")+". Toque numa consulta para abrir."),
+    b1,b2,b3,b4,b5,b6,b7,b8,b9));
+  desenhaTL();desenhaCons();
 }
 
 /* ---------- vista: simulador ---------- */
