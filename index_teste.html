@@ -821,7 +821,7 @@ function selEstrutura(id){selEstrId=id;selN=null;
         h("dt",{},"Últimos 30 dias"),h("dd",{},nf(ac.d30,1)+" mm"),
         h("dt",{},"Mês corrente"),h("dd",{},nf(ac.mes,1)+" mm"),
         h("dt",{},"Ano hidrológico"),h("dd",{},nf(ac.ano,1)+" mm desde "+dmy(ac.inicioAno))));
-    const hist=D.chuva.filter(c=>c.estrutura_id===reg.id).slice(0,8);
+    const hist=D.chuva.filter(c=>c.estrutura_id===reg.id).slice(0,5);
     corpo.push(h("div",{class:"badge"},"Últimas leituras"),
       hist.length?h("div",{},...hist.map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data)+" · "),nf(c.mm,1)+" mm",
         h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.obs?h("div",{class:"d"},c.obs):null))):h("div",{class:"note"},"Sem leituras registradas."),
