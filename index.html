@@ -550,7 +550,8 @@ function posicaoModelo(){
   const b={dataBase:db,publicadoEm:D.posicao.publicado_em,prorata,diaMes:dia,diasMes:dim,mesRef:P.fixo_mes_ref,
     compradas:n("cab_compradas"),mortes:n("mortes_refugos"),preex:n("cab_preexistentes"),vendaveis:n("cab_vendaveis"),
     N:n("cab_compradas")-n("mortes_refugos")+n("cab_preexistentes"),dias:n("dias_restantes"),alvo:n("preco_alvo_rs_cab"),vendaData:P.data_venda,
-    aquis:n("aquisicao_rs"),frete:n("frete_aquisicao_rs"),sanit:n("manejo_sanitario_rs"),aq:n("aquisicao_rs")+n("frete_aquisicao_rs")+n("manejo_sanitario_rs"),rac:n("racao_consumida_rs"),racBase:n("racao_base_rs"),kgHoje:n("racao_base_kg"),
+    /* aquisição + frete numa linha (decisão de 28/10/2026; Breakeven B21 do modelo); posições anteriores trazem as duas chaves separadas */
+    aquisFrete:(P.aquisicao_frete_rs!=null?n("aquisicao_frete_rs"):n("aquisicao_rs")+n("frete_aquisicao_rs")),sanit:n("manejo_sanitario_rs"),rac:n("racao_consumida_rs"),racBase:n("racao_base_rs"),kgHoje:n("racao_base_kg"),
     feno:n("feno_apontado_rs"),fenoRolos:n("feno_rolos_apontados"),fenoKgRolo:n("feno_kg_rolo"),fenoKg:n("feno_rolos_apontados")*n("feno_kg_rolo"),
     op:n("op_ciclo_rs"),fixm:n("fixo_pleno_mes_rs"),depm:n("depreciacao_mes_plena_rs"),
     fixp:n("fixos_incorridos_producao_rs")+n("fixo_pleno_producao_rs")*prorata,adm:n("fixos_incorridos_adm_rs")+n("fixo_pleno_adm_rs")*prorata,
@@ -563,7 +564,7 @@ function posicaoModelo(){
     acumulado:n("gasto_acumulado_rs"),projetado:n("gasto_projetado_rs"),margemCab:n("margem_cab_rs"),saldoAndre:n("saldo_andre_rs"),cota:n("cota_socio_rs"),
     desembAndre:n("desembolso_andre_rs"),desembDanilo:n("desembolso_danilo_rs"),estoqueVal:n("estoque_valor_rs"),comprasPrev:n("compras_previstas_rs"),
     diasDec:n("dias_decorridos"),inicio:P.inicio_ciclo,custoCabDia:n("custo_cab_dia_rs"),ritmoDia:n("ritmo_kg_dia")};
-  b.rcd=b.rkg*b.pkg;b.gastoA=b.aq+b.rac+b.op+b.fixp+b.adm;
+  b.aq=b.aquisFrete+b.sanit;b.rcd=b.rkg*b.pkg;b.gastoA=b.aq+b.rac+b.op+b.fixp+b.adm;
   return b;
 }
 const posLinha=()=>D.posicao?"Posição do modelo de "+dmy(D.posicao.data_base)+" · publicada em "+fmtPub(D.posicao.publicado_em):"posição do modelo ainda não publicada";
@@ -1551,7 +1552,7 @@ function viewSimulador(main){
   const $S=id=>root.querySelector("#sv-"+id);
 
   const baseRows=[["Rebanho",`${b.N} cabeças na propriedade: ${b.compradas-b.mortes} compradas vivas (${b.compradas} − ${b.mortes} morte(s)) + ${b.preex} pré-existente(s) sem custo de compra`],["Venda prevista do que fica",dmy(b.vendaData)+" · "+b.dias+" dias"],["Preço-alvo de referência",R(b.alvo,0)+"/cab"],
-    ["Aquisição do rebanho (gado + comissão + taxas)",R(b.aquis)],["Frete de aquisição dos animais",R(b.frete)],["Manejo sanitário",R(b.sanit)],["Ração consumida até "+db+" (ração base + feno apontado)",R(b.rac)],["Gastos operacionais do ciclo (OP)",R(b.op)],["Fixos de produção até "+db+" (com depreciação)",R(b.fixp)],["Despesas administrativas",R(b.adm)],
+    ["Aquisição do rebanho + frete (gado, comissão, taxas e frete de aquisição)",R(b.aquisFrete)],["Manejo sanitário",R(b.sanit)],["Ração consumida até "+db+" (ração base + feno apontado)",R(b.rac)],["Gastos operacionais do ciclo (OP)",R(b.op)],["Fixos de produção até "+db+" (com depreciação)",R(b.fixp)],["Despesas administrativas",R(b.adm)],
     ["Ração do que fica",fmt(b.rkg,2)+" kg/cab/dia × "+R(b.pkg,4)+"/kg = "+R(b.rcd,2)+"/cab-dia (+ "+fmt(b.estfenoRolos,0)+" rolos de feno)"],["Fixos mensais por competência (serviço pleno)",R(b.fixm)+" (depreciação "+R(b.depm)+")"],
     ["Desembolsado até "+db+" (base do Rateio)",R(b.desemb)],[b.prorata>0?`Fixos de ${mesNome} a pagar (1–${b.diaMes}/${b.dataBase.slice(5,7)})`:"Fixos do mês da data-base","" +(b.prorata>0?R(b.apagar):"já realizados na matriz do modelo")],["Imobilizado (cerca, pastagem, benfeitorias, sede)",R(b.imob)],["Depreciação já lançada (meses fechados + pro-rata)",R(b.deplan)],["Estoque de ração / feno / mineral / núcleos de aves e suínos",R(b.estrac)+" (≈ "+fmt(b.estKg/1000,1)+" t) / "+R(b.estfeno)+" ("+fmt(b.estfenoRolos,0)+" rolos) / "+R(b.estmin)+" / "+R(b.estoutros)]];
   $S("baseList").innerHTML=baseRows.map(([l,v])=>`<div class="sim-brow"><span class="bl">${l}</span><span class="bv">${v}</span></div>`).join("");
@@ -1591,8 +1592,7 @@ function viewSimulador(main){
       ["Custo completo por cabeça",R(r.custoCab,0),"breakeven do cenário",""]];
     const dre=[["Receita — grupo vendido agora ("+r.n1+" cab a "+R(s.p1,0)+")",R(r.rec1),porCab(r.rec1)],
       ["Receita — restante ("+grupo2+")",R(r.rec2),porCab(r.rec2)],
-      ["Aquisição do rebanho (gado + comissão + taxas)",R(b.aquis),porCab(b.aquis)],
-      ["Frete de aquisição dos animais",R(b.frete),porCab(b.frete)],
+      ["Aquisição do rebanho + frete",R(b.aquisFrete),porCab(b.aquisFrete)],
       ["Manejo sanitário",R(b.sanit),porCab(b.sanit)],
       ["Ração consumida até "+db,R(b.rac),porCab(b.rac)],
       ["Gastos operacionais do ciclo (OP)",R(b.op),porCab(b.op)],
