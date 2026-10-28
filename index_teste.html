@@ -202,6 +202,13 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .kpi .v{font-family:var(--f-display);font-stretch:85%;font-weight:800;font-size:28px;font-variant-numeric:tabular-nums}
 .kpi .l{font-size:13px;color:var(--muted)}
 .kpi .s{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:4px}
+.kpis.kpis4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:900px){.kpis.kpis4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:420px){.kpis.kpis4{gap:8px}.kpis.kpis4 .kpi{padding:12px}.kpis.kpis4 .kpi .v{font-size:23px}}
+.kpi .v.pos{color:var(--ok)}.kpi .v.neg{color:var(--bad)}
+.kpi-grupo{margin-top:16px}
+.kpi-tit{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px;font:700 12px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kpi-tit .selo{margin-left:0}
 /* ---- simulador de venda do lote (convenção: campo editável = amarelo, como no modelo) ---- */
 .sim{--input:#fff7dc;--input-line:#d8c98a}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sim{--input:#2a2a1c;--input-line:#6b6236}}
@@ -1242,19 +1249,30 @@ function viewIndicadores(main){
   const kg7=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
   const probAgua=(()=>{const porE={};D.insp.forEach(i=>{if(!porE[i.estrutura_id])porE[i.estrutura_id]=i;});
     return Object.values(porE).filter(i=>!(i.funcionamento&&i.limpeza&&i.qualidade)).length;})();
-  const kpi=(v,l,s)=>h("div",{class:"kpi"},h("div",{class:"v"},v),h("div",{class:"l"},l),s?h("div",{class:"s"},s):null);
+  const kpi=(v,l,s,cls)=>h("div",{class:"kpi"},h("div",{class:"v"+(cls?" "+cls:"")},v),h("div",{class:"l"},l),s?h("div",{class:"s"},s):null);
   const pm=posicaoModelo();const pmTxt=pm?"modelo de "+dmy(pm.dataBase):"posição do modelo ainda não publicada";
+  /* 4 operacionais (todos os papéis) + 4 financeiros (só sócio e administrador — decisão de 28/10/2026; o banco já
+     restringe a posição do modelo por RLS, aqui o bloco nem é montado para o usuário padrão) */
+  const R0i=v=>"R$ "+nf(v,0), sgnR=v=>(v>=0?"+":"−")+"R$ "+nf(Math.abs(v),0);
+  const oper=[
+    kpi(String(cab),"Cabeças vigentes",vig.map(m=>lote(m.lote_id)+" "+m.cabecas).join(" · ")),
+    kpi(nf(areaOc?cab/areaOc:0,1),"Lotação (cab/ha)",nf(areaOc?UA(cab)/areaOc:0,2)+" UA/ha · pastos ocupados"),
+    kpi(d7.length?nf(kg7/7/cab,2):"—","Ração (kg/cab/dia · 7 d)",(d7.length?nf(kg7,0)+" kg na semana":"sem apontamentos de Cocho")+(D.socio&&pm?" · estoque p/ "+nf(pm.autonomia,0)+" dias":"")),
+    kpi(String(probAgua),"Água com pendência",D.insp.length?"pontos · última inspeção":"sem inspeções registradas")];
+  const P=D.posicao?.valores||{};
+  const fin=pm?[
+    kpi(R0i(pm.breakeven),"Breakeven competência","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakeven),pm.alvo-pm.breakeven>=0?"pos":"neg"),
+    kpi(R0i(pm.breakevenCaixa),"Breakeven caixa","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakevenCaixa),pm.alvo-pm.breakevenCaixa>=0?"pos":"neg"),
+    kpi(R0i(pm.acumulado/pm.vendaveis),"Gasto acumulado/cab",R0i(pm.acumulado)+" · "+nf(pm.vendaveis,0)+" cab vendáveis"),
+    kpi("R$ "+nf(Number(P.gasto_agregado_cab_dia_rs||0),2),"Gasto por cab/dia","ração R$ "+nf(pm.custoCabDia,2)+" + demais")]:
+    [h("div",{class:"note"},pmTxt)];
+  const grupo=(titulo,selo,itens)=>h("div",{class:"kpi-grupo"},h("div",{class:"kpi-tit"},h("span",{},titulo),selo),h("div",{class:"kpis kpis4"},...itens));
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Indicadores"),
-    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"+(pm?" · "+posLinha()+" ":""),pm?posSelo():null),
-    h("div",{class:"kpis"},
-      kpi(String(cab),"Cabeças vigentes",vig.map(m=>lote(m.lote_id)+" "+m.cabecas).join(" · ")),
-      kpi(String(dias),"Dias até a venda prevista",dmy(V.data)+(D.socio?" · preço-alvo R$ "+nf(V.alvo,0)+"/cab":"")),
-      kpi(nf(areaOc?cab/areaOc:0,1),"Lotação dos pastos ocupados (cab/ha)",nf(areaOc?UA(cab)/areaOc:0,2)+" UA/ha · ref. 0,75 UA/cab"),
-      kpi(d7.length?nf(kg7/7/cab,2):"—","Consumo registrado (kg/cab/dia, 7 dias)",d7.length?nf(kg7,0)+" kg na semana":"sem apontamentos de Cocho ainda"),
-      kpi(String(probAgua),"Pontos de Água com pendência",D.insp.length?"última inspeção por ponto":"sem inspeções registradas ainda"),
-      kpi(pm?nf(pm.autonomia,0)+" dias":"—","Autonomia da ração em estoque",pm?nf(pm.estKg,0)+" kg de ração base ÷ "+nf(pm.ritmoDia,0)+" kg/dia · "+pmTxt:D.socio?pmTxt:"posição do modelo (sócios)"),
-      D.socio?kpi(pm?"R$ "+nf(pm.acumulado/pm.vendaveis,0):"—","Gasto acumulado por cabeça vendável",pm?"breakeven projetado R$ "+nf(pm.breakeven,0)+"/cab · "+pmTxt:pmTxt):null)));
+    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção, "+nf(Math.max(0,dias),0)+" dias)"),
+    grupo("Operacionais",h("span",{class:"selo vig"},"Agora"),oper),
+    D.socio?grupo("Financeiros",pm?posSelo():null,fin):null,
+    D.socio&&pm?h("p",{class:"note",style:"margin-top:10px"},posLinha()):null));
 }
 
 /* ---------- vista: consultas sob demanda (sócios) ----------
