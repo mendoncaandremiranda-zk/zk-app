@@ -247,6 +247,13 @@ details.sim-panel[open] summary::after{content:"▾"}
 .sim-nome input{flex:1;min-width:200px;font:500 13px var(--f-body);padding:6px 8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px}
 @media (pointer:coarse){.sim-field input{min-height:40px}}
 .note{font-size:13px;color:var(--muted)}
+#sim-print{display:none}
+@media print{body>*:not(#sim-print){display:none!important}#sim-print{display:block;font:10pt Arial,sans-serif;color:#000}
+  #sim-print h1{font-size:15pt;color:#2f5d46;margin:0 0 8px}#sim-print h4{font-size:10pt;text-transform:uppercase;letter-spacing:.04em;background:#2f5d46;color:#fff;padding:3px 6px;margin:12px 0 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #sim-print section{break-inside:avoid;page-break-inside:avoid}#sim-print h4{break-after:avoid}#sim-print table{width:100%;border-collapse:collapse}#sim-print td,#sim-print th{border-bottom:1px solid #ccc;padding:3px 6px;text-align:left;vertical-align:top}
+  #sim-print th{background:#e8f1e9;-webkit-print-color-adjust:exact;print-color-adjust:exact}#sim-print .n{text-align:right;white-space:nowrap}
+  #sim-print tr.tot td{font-weight:700;background:#e8f1e9;-webkit-print-color-adjust:exact;print-color-adjust:exact}#sim-print table.cab td:first-child{font-weight:700;width:30%}#sim-print p{margin:4px 0;font-size:9pt}
+  @page{size:A4;margin:14mm}}
 .ph h3 .area-ha{font:500 0.8em var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 details.pasta-rel{margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:2px 12px}
 details.pasta-rel summary{cursor:pointer;font:600 13px var(--f-body);color:var(--muted);padding:8px 0;list-style:none}
@@ -1476,9 +1483,8 @@ function viewSimulador(main){
           <div class="sim-acoes">
             <select id="sv-salvas" class="sim-sel" aria-label="Simulações salvas"><option value="">Simulações salvas…</option></select>
             <button class="btn sm" type="button" id="sv-salvarComo">Salvar como…</button>
-            <button class="btn sm" type="button" id="sv-repor" title="Volta os campos ao padrão calculado do preço-alvo e do rebanho da posição">Repor padrão do modelo</button>
-            <button class="btn sm" type="button" id="sv-csv" title="Planilha simples (abre no Excel/Numbers) com entradas, resultado, caixa e ração deste cenário">Baixar resumo (.csv)</button>
-            <button class="btn sm" type="button" id="sv-txt" title="O mesmo resumo em texto, para WhatsApp ou e-mail">Resumo em texto (.txt)</button>
+            <button class="btn sm" type="button" id="sv-xlsx" title="Planilha Excel com entradas, resultado, caixa e ração deste cenário">Resumo em Excel</button>
+            <button class="btn sm" type="button" id="sv-pdf" title="Abre a impressão só com o resumo — escolha Salvar como PDF">Resumo em PDF</button>
           </div>
           <form id="sv-nomeForm" class="sim-nome" hidden><input type="text" id="sv-nome" maxlength="40" placeholder="nome do cenário (ex.: proposta 3.050 frente)" autocomplete="off"><button class="btn pri sm" type="submit">Salvar</button><button class="btn sm" type="button" id="sv-nomeCancel">Cancelar</button></form>
         </div>
@@ -1615,7 +1621,7 @@ function viewSimulador(main){
   function estado(){
     const el=$S("estado");if(!el)return;
     const o=SIM_ST.origem||{tipo:"padrao"};let t;
-    if(o.tipo==="padrao")t="Entradas: padrão do modelo (preço-alvo × rebanho). Ao editar, seus números ficam guardados como sua última simulação.";
+    if(o.tipo==="padrao")t="Entradas: valores iniciais calculados do preço-alvo e do rebanho (primeira simulação). Ao editar, seus números ficam guardados e passam a ser o padrão.";
     else if(o.tipo==="ultima")t=`Entradas: sua última simulação, salva em ${fmtPub(o.em)}`+(o.dataBase&&o.dataBase!==b.dataBase?` sobre a posição de ${dmy(o.dataBase)} — a posição do modelo já é de ${db}; seus números foram mantidos`:"")+(o.local?" (cópia guardada neste aparelho, mais nova que a do banco)":"")+".";
     else t=`Entradas: cenário "${o.nome}" de ${o.de} (salvo em ${fmtPub(o.em)}). Ao editar, vira a sua última simulação.`;
     if(SIM_ST.salvoErro)t+=` Não gravou no banco (${SIM_ST.salvoErro}); guardado neste aparelho.`;
@@ -1648,48 +1654,105 @@ function viewSimulador(main){
   function aplicar(s,origem){const nv=simMesclar(simPadrao(b),s.entradas);for(const k in nv)st[k]=nv[k];SIM_ST.modo=SIM_MODES[s.modo]?s.modo:"lote";SIM_ST.origem=origem;SIM_ST.salvoEm=null;SIM_ST.salvoErro=null;marcarAba();renderInputs();estado();simAgendarSalvar();}
   $S("salvas").addEventListener("change",e=>{const s=D.sims.find(x=>x.id===e.target.value);e.target.value="";if(!s)return;
     aplicar(s,{tipo:"cenario",nome:s.nome==="ultima"?"última simulação":s.nome,de:(s.usuario_email||"").split("@")[0],em:s.atualizado_em});});
-  $S("repor").addEventListener("click",()=>{aplicar({entradas:simPadrao(b),modo:SIM_ST.modo},{tipo:"padrao"});});
   $S("salvarComo").addEventListener("click",()=>{const f=$S("nomeForm");f.hidden=!f.hidden;if(!f.hidden)$S("nome").focus();});
   $S("nomeCancel").addEventListener("click",()=>{$S("nomeForm").hidden=true;});
   $S("nomeForm").addEventListener("submit",async e=>{e.preventDefault();const nome=$S("nome").value.trim().replace(/\s+/g," ");if(!nome||nome.toLowerCase()==="ultima")return;
     const l=await simSalvar(nome);if(l){SIM_ST.origem={tipo:"cenario",nome,de:simEmail().split("@")[0],em:l.atualizado_em};$S("nomeForm").hidden=true;$S("nome").value="";listarSalvas();estado();}});
 
-  /* ---- resumo exportável: planilha simples (.csv) e texto (.txt), das mesmas linhas da tela ---- */
+  /* ---- resumo exportável: Excel (.xlsx, gerado aqui mesmo, sem biblioteca) e PDF (impressão do navegador → "Salvar como PDF"),
+     das mesmas linhas da tela ---- */
   const strip=x=>String(x??"").replace(/<[^>]+>/g,"");
   function resumoDados(){
     const u=SIM_ST.ultimo;if(!u)return null;const m=SIM_MODES[SIM_ST.modo];
     const agora=new Date();
     return {
-      cabecalho:[["Simulador de Venda do Lote — resumo da simulação"],["Gerado em",fmtPub(agora.toISOString())+" por "+simEmail().split("@")[0]],
-        ["Posição do modelo","data-base "+db,"publicada em "+fmtPub(b.publicadoEm)],["Forma de venda",m.label],["Venda prevista do que fica",dmy(b.vendaData)+" · "+b.dias+" dias"],["Rebanho na propriedade",b.N+" cab"]],
-      entradas:m.fields.map(([id,label])=>[T(label),fmt(st[SIM_ST.modo][id],0)]),
-      kpis:u.L.kpis.map(k=>[k[0],strip(k[1]),strip(k[2])]),
-      dre:u.L.dre.map(x=>[strip(x[0]),strip(x[1]),strip(x[2])]),
-      caixa:u.L.caixa.map(x=>[strip(x[0]),strip(x[1])]),
-      racHoje:u.L.racHoje.map(x=>[strip(x[0]),strip(x[1])]),
-      racFut:u.L.racFut.map(x=>[strip(x[0]),strip(x[1])]),
+      titulo:"Simulador de Venda do Lote — resumo da simulação",
+      cabecalho:[["Gerado em",fmtPub(agora.toISOString())+" por "+simEmail().split("@")[0]],
+        ["Posição do modelo","data-base "+db+" · publicada em "+fmtPub(b.publicadoEm)],["Forma de venda",m.label],["Venda prevista do que fica",dmy(b.vendaData)+" · "+b.dias+" dias"],["Rebanho na propriedade",b.N+" cab"]],
+      secoes:[
+        {t:"Entradas",cab:["Campo","Valor"],rows:m.fields.map(([id,label])=>[T(label),fmt(st[SIM_ST.modo][id],0)])},
+        {t:"Resultado",cab:["Indicador","Valor","Detalhe"],rows:u.L.kpis.map(k=>[k[0],strip(k[1]),strip(k[2])])},
+        {t:"Resultado do ciclo por competência",cab:["Item","R$","R$/cab vendida"],rows:u.L.dre.map(x=>[strip(x[0]),strip(x[1]),strip(x[2]),x[3]==="tot"])},
+        {t:"Caixa dos sócios",cab:["Item","R$"],rows:u.L.caixa.map(x=>[strip(x[0]),strip(x[1]),undefined,x[3]==="tot"])},
+        {t:"Ração gasta até a data-base",cab:["Item","Valor"],rows:u.L.racHoje.map(x=>[strip(x[0]),strip(x[1])])},
+        {t:"Previsão de ração do grupo que fica",cab:["Item","Valor"],rows:u.L.racFut.map(x=>[strip(x[0]),strip(x[1]),undefined,x[3]==="tot"])}],
       notas:[u.L.econNote,u.L.racFutNote,regras]};
   }
-  function csvTexto(){
-    const d=resumoDados();if(!d)return"";
-    const q=v=>{v=String(v??"");return /[;"\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};const L=r=>r.map(q).join(";");
-    const sec=(t,cab,rows)=>[t?[t]:null,cab,...rows].filter(Boolean).map(L);
-    return [...sec(null,null,d.cabecalho),"",...sec("ENTRADAS",["Campo","Valor"],d.entradas),"",...sec("RESULTADO",["Indicador","Valor","Detalhe"],d.kpis),"",
-      ...sec("RESULTADO DO CICLO POR COMPETÊNCIA",["Item","R$","R$/cab vendida"],d.dre),"",...sec("CAIXA DOS SÓCIOS",["Item","R$"],d.caixa),"",
-      ...sec("RAÇÃO GASTA ATÉ A DATA-BASE",["Item","Valor"],d.racHoje),"",...sec("PREVISÃO DE RAÇÃO DO GRUPO QUE FICA",["Item","Valor"],d.racFut),"",...sec("NOTAS",null,d.notas.map(n=>[n]))].join("\r\n");
+  /* valor exibido → número para o Excel ("R$ 1.234,56", "+R$ 9.251", "−R$ 73.612", "3.000"); texto continua texto */
+  function numDe(s){s=String(s??"").trim();let m=/^([+−-])?\s*R\$\s*(-?)([\d.]+(?:,\d+)?)$/.exec(s);
+    if(m){let v=Number(m[3].replace(/\./g,"").replace(",","."));if(m[1]==="−"||m[1]==="-"||m[2]==="-")v=-v;return{v,f:"rs"};}
+    m=/^-?[\d.]+(,\d+)?$/.exec(s);if(m&&/\d/.test(s))return{v:Number(s.replace(/\./g,"").replace(",",".")),f:"int"};return null;}
+  function xlsxBlob(){
+    const d=resumoDados();if(!d)return null;
+    const X=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"");
+    /* estilos: 0 normal · 1 título · 2 faixa de seção · 3 cabeçalho de tabela · 4 R$ · 5 inteiro · 6 negrito · 7 R$ negrito · 8 nota (quebra de linha) */
+    const linhas=[];let r=0;
+    const cel=(c,val,est)=>{const ref=c+(r+1);if(val==null||val==="")return est?`<c r="${ref}" s="${est}"/>`:"";
+      const n=(est===0||est===6)?numDe(val):null;
+      if(n)return `<c r="${ref}" s="${n.f==="rs"?(est===6?7:4):5}"><v>${n.v}</v></c>`;
+      return `<c r="${ref}" s="${est||0}" t="inlineStr"><is><t xml:space="preserve">${X(val)}</t></is></c>`;};
+    const add=(cells,ht)=>{r++;linhas.push(`<row r="${r}"${ht?` ht="${ht}" customHeight="1"`:""}>${cells.join("")}</row>`);};
+    const merges=[];
+    add([cel("A",d.titulo,1)],22);
+    d.cabecalho.forEach(([k,v])=>add([cel("A",k,6),cel("B",v,0)]));
+    d.secoes.forEach(sc=>{add([]);add(["A","B","C"].map((c,i)=>cel(c,i?"":sc.t.toUpperCase(),2)));merges.push(`A${r}:C${r}`);
+      add(sc.cab.map((h2,i)=>cel("ABC"[i],h2,3)));
+      sc.rows.forEach(x=>{const e=x[3]?6:0;add([cel("A",x[0],e),cel("B",x[1],e),x[2]!==undefined?cel("C",x[2],e):""]);});});
+    add([]);add(["A","B","C"].map((c,i)=>cel(c,i?"":"NOTAS",2)));merges.push(`A${r}:C${r}`);
+    d.notas.forEach(n=>{add([cel("A",n,8)],Math.max(15,Math.ceil(String(n).length/110)*15));merges.push(`A${r}:C${r}`);});
+    const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><cols><col min="1" max="1" width="64" customWidth="1"/><col min="2" max="2" width="26" customWidth="1"/><col min="3" max="3" width="22" customWidth="1"/></cols><sheetData>${linhas.join("")}</sheetData><mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join("")}</mergeCells><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+    const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;R$&quot; #,##0.00;[Red]-&quot;R$&quot; #,##0.00"/><numFmt numFmtId="165" formatCode="#,##0"/></numFmts>`+
+      `<fonts count="4"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="14"/><color rgb="FF2F5D46"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font></fonts>`+
+      `<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2F5D46"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE8F1E9"/></patternFill></fill></fills>`+
+      `<borders count="2"><border/><border><bottom style="thin"><color rgb="FFC9D3CB"/></bottom></border></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="9">`+
+      `<xf fontId="0" borderId="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>`+
+      `<xf fontId="1" applyFont="1"/>`+
+      `<xf fontId="2" fillId="2" applyFont="1" applyFill="1"/>`+
+      `<xf fontId="3" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>`+
+      `<xf numFmtId="164" fontId="0" borderId="1" applyNumberFormat="1" applyBorder="1"><alignment vertical="top"/></xf>`+
+      `<xf numFmtId="165" fontId="0" borderId="1" applyNumberFormat="1" applyBorder="1"><alignment vertical="top"/></xf>`+
+      `<xf fontId="3" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="top" wrapText="1"/></xf>`+
+      `<xf numFmtId="164" fontId="3" fillId="3" borderId="1" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"><alignment vertical="top"/></xf>`+
+      `<xf fontId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    const files=[["[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+      ["_rels/.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+      ["xl/workbook.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Simulação" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+      ["xl/_rels/workbook.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+      ["xl/styles.xml",styles],["xl/worksheets/sheet1.xml",sheet]];
+    return new Blob([zipStore(files)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
   }
-  function txtTexto(){
-    const d=resumoDados();if(!d)return"";
-    const linha=r=>r.length>1?`${r[0]}: ${r.slice(1).join(" · ")}`:r[0];
-    const sec=(t,rows)=>["",t.toUpperCase(),"-".repeat(Math.min(60,t.length+4)),...rows.map(linha)];
-    return [...d.cabecalho.map(linha),...sec("Entradas",d.entradas),...sec("Resultado",d.kpis),...sec("Resultado do ciclo por competência (R$ · R$/cab vendida)",d.dre),
-      ...sec("Caixa dos sócios",d.caixa),...sec("Ração gasta até a data-base",d.racHoje),...sec("Previsão de ração do grupo que fica",d.racFut),...sec("Notas",d.notas.map(n=>[n]))].join("\n");
+  /* zip sem compressão (método 0) — suficiente para o .xlsx */
+  function zipStore(files){
+    const enc=new TextEncoder(),T32=zipStore.t||(zipStore.t=Array.from({length:256},(_,n)=>{let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;return c>>>0;}));
+    const crc=u=>{let c=0xFFFFFFFF;for(const x of u)c=T32[(c^x)&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;};
+    const partes=[],central=[];let off=0;
+    const u16=v=>[v&255,(v>>>8)&255],u32=v=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+    for(const[nome,txt]of files){const n=enc.encode(nome),dados=enc.encode(txt),c=crc(dados);
+      const loc=new Uint8Array([...u32(0x04034b50),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(c),...u32(dados.length),...u32(dados.length),...u16(n.length),...u16(0)]);
+      partes.push(loc,n,dados);
+      central.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(c),...u32(dados.length),...u32(dados.length),...u16(n.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),n);
+      off+=loc.length+n.length+dados.length;}
+    const tamC=central.reduce((s,x)=>s+x.length,0);
+    return new Blob([...partes,...central,new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(tamC),...u32(off),...u16(0)])]);
   }
   function nomeArquivo(ext){const a=new Date(),p=n=>String(n).padStart(2,"0");return `simulacao_${SIM_ST.modo}_${a.getFullYear()}-${p(a.getMonth()+1)}-${p(a.getDate())}_${p(a.getHours())}${p(a.getMinutes())}.${ext}`;}
-  function baixar(nome,texto,tipo){const blob=new Blob(["﻿"+texto],{type:tipo});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=nome;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);}
-  $S("csv").addEventListener("click",()=>baixar(nomeArquivo("csv"),csvTexto(),"text/csv;charset=utf-8"));
-  $S("txt").addEventListener("click",()=>baixar(nomeArquivo("txt"),txtTexto(),"text/plain;charset=utf-8"));
-  window.SIM_API={csv:csvTexto,txt:txtTexto,dados:resumoDados}; // usado pelos testes (testes/harness.js)
+  function baixarBlob(nome,blob){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=nome;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);}
+  /* PDF: página de impressão só com o resumo; o navegador oferece "Salvar como PDF" (no iPhone: Compartilhar → Salvar em Arquivos) */
+  function htmlResumo(){
+    const d=resumoDados();if(!d)return"";
+    const tb=sc=>`<section><h4>${esc(sc.t)}</h4><table><tr>${sc.cab.map((c,i)=>`<th${i?' class="n"':""}>${esc(c)}</th>`).join("")}</tr>${sc.rows.map(x=>`<tr${x[3]?' class="tot"':""}><td>${esc(x[0])}</td><td class="n">${esc(x[1])}</td>${sc.cab.length>2?`<td class="n">${esc(x[2]??"")}</td>`:""}</tr>`).join("")}</table></section>`;
+    return `<h1>${esc(d.titulo)}</h1><table class="cab">${d.cabecalho.map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>${d.secoes.map(tb).join("")}<h4>Notas</h4>${d.notas.map(n=>`<p>${esc(n)}</p>`).join("")}`;
+  }
+  function gerarPdf(){
+    let pr=document.getElementById("sim-print");if(pr)pr.remove();
+    pr=document.createElement("div");pr.id="sim-print";pr.innerHTML=htmlResumo();document.body.appendChild(pr);
+    const tit=document.title;document.title=nomeArquivo("pdf").replace(/\.pdf$/,"");
+    const fim=()=>{document.title=tit;pr.remove();removeEventListener("afterprint",fim);};
+    addEventListener("afterprint",fim);setTimeout(()=>window.print(),50);
+  }
+  $S("xlsx").addEventListener("click",()=>{const bl=xlsxBlob();if(bl)baixarBlob(nomeArquivo("xlsx"),bl);});
+  $S("pdf").addEventListener("click",gerarPdf);
+  window.SIM_API={dados:resumoDados,xlsx:xlsxBlob,html:htmlResumo}; // usado pelos testes (testes/harness.js)
 
   marcarAba();listarSalvas();renderInputs();estado();
 }
