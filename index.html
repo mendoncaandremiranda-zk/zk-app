@@ -332,6 +332,7 @@ const CATALOGO_PREM=[
   ["gmd_meta_kg_dia","GMD meta (ganho médio diário)","kg/dia","geral"],
   ["peso_entrada_kg_cab","Peso médio de entrada","kg/cab","geral"],
   ["peso_venda_kg_cab","Peso-alvo de venda (peso)","kg/cab","geral"],
+  ["mortalidade_prevista_pct","Mortalidade prevista (provisão do ciclo)","%","geral"],
   ["mortalidade_max_pct","Mortalidade máxima tolerada","%","geral"]]],
  ["Nutrição e suplementação",[
   ["consumo_racao_kg_cab_dia","Consumo de ração — meta","kg/cab/dia","geral"],
@@ -488,6 +489,12 @@ async function carregar(){
    · rebanho na propriedade = compradas − mortes + pré-existentes.
    Identidade que o Simulador exige (conciliação = 0): gastoA + estoque + imobilizado líquido = desembolsado + a pagar. */
 const fonteDe=k=>D.premFonte.find(f=>f.chave===k)||null;
+/* premissas de fonte app que a planilha também tem como célula própria: até o sentido banco→modelo existir, o app
+   avisa quando os dois valores divergem (chave da premissa → chave do valor na posição do modelo) */
+const ESPELHO_MODELO={mortalidade_prevista_pct:"mortalidade_prevista_pct"};
+const divergeModelo=p=>{const k=ESPELHO_MODELO[p.chave];const P=D.posicao?.valores;if(!k||!P||P[k]==null)return null;
+  const a=Number(String(p.valor).replace(",","."));const m=Number(P[k]);if(!Number.isFinite(a)||!Number.isFinite(m))return null;
+  return Math.abs(a-m)>1e-9?{modelo:m,origem:D.posicao.origens?.[k]||"modelo"}:null;};
 const fonteModelo=k=>fonteDe(k)?.fonte==="modelo";
 const fmtPub=iso=>{if(!iso)return"—";const d=new Date(iso);return d.toLocaleDateString("pt-BR")+" "+d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});};
 function posicaoModelo(){
@@ -1110,6 +1117,8 @@ function viewPremissas(main){
         h("div",{class:"inline-edit"},ok,volta)));
     });
     /* chave cuja fonte é o MODELO (premissas_fonte): só exibição — altera-se na planilha e a ponte propaga com vigência */
+    const dv=divergeModelo(p);
+    if(dv)tr.children[2].append(h("div",{class:"selo bad",style:"display:block;margin-top:4px",title:dv.origem},"≠ modelo: "+nf(dv.modelo*100,1)+"% ("+dmy(D.posicao.data_base)+")"));
     if(fonteModelo(p.chave)){const f=fonteDe(p.chave);
       acao.append(h("span",{class:"selo hist",title:"Fonte: planilha-modelo · "+(f.origem||"")},"Fonte: modelo"),
         h("div",{style:"font-size:11px;color:var(--muted);margin-top:4px"},f.origem||""));return tr;}
