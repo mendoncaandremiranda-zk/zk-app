@@ -238,6 +238,13 @@ details.sim-panel[open] summary::after{content:"▾"}
 .sim-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-top:14px}
 .sim .tablewrap{overflow-x:auto}
 .sim .hint{font-size:12px;color:var(--muted);margin-top:12px;max-width:80ch}
+.sim-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;margin:10px 0 0}
+.sim-bar .note{flex:1 1 280px;font-size:12px}
+.sim-acoes{display:flex;flex-wrap:wrap;gap:6px}
+.sim-sel{font:600 12.5px var(--f-body);padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);max-width:260px}
+.sim-nome{display:flex;gap:6px;flex-wrap:wrap;width:100%}
+.sim-nome[hidden]{display:none}
+.sim-nome input{flex:1;min-width:200px;font:500 13px var(--f-body);padding:6px 8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px}
 @media (pointer:coarse){.sim-field input{min-height:40px}}
 .note{font-size:13px;color:var(--muted)}
 details.pasta-rel{margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:2px 12px}
@@ -445,7 +452,7 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
 /* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
    Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
    O banco garante por RLS; aqui só se decide o que aparece na tela. */
@@ -476,8 +483,10 @@ async function carregar(){
        das premissas e últimas execuções — todos tolerantes: sem a tabela ou sem permissão, seguem vazios */
     sb.from("posicao_modelo").select("id,data_base,recalculado_em,arquivo_sha256,valores,origens,versao_catalogo,publicado_em").order("publicado_em",{ascending:false}).limit(1).then(({data})=>data&&data[0]||null).catch(()=>null),
     q("premissas_fonte","chave,fonte,origem,consumidores,obs").catch(()=>[]),
-    sb.from("ponte_execucoes").select("iniciado_em,ambiente,modo,data_base,resultado,resumo").order("iniciado_em",{ascending:false}).limit(5).then(({data})=>data||[]).catch(()=>[])]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],quando:new Date()});
+    sb.from("ponte_execucoes").select("iniciado_em,ambiente,modo,data_base,resultado,resumo").order("iniciado_em",{ascending:false}).limit(5).then(({data})=>data||[]).catch(()=>[]),
+    /* simulações salvas (db/20): a "última" de cada usuário e os cenários com nome — tolerante (sem a tabela, lista vazia) */
+    sb.from("simulacoes").select("id,usuario_email,nome,modo,entradas,resultado,posicao_id,data_base,atualizado_em").order("atualizado_em",{ascending:false}).then(({data})=>data||[]).catch(()=>[])]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],quando:new Date()});
   salvarSnapshot();
 }
 /* ---------- posição do modelo (ponte modelo→banco) ----------
@@ -1386,7 +1395,8 @@ function viewConsultas(main){
 /* Portado do simulador aprovado (anexo de 27/10). Só preços e quantidades de cabeças são editáveis; o restante
    vem da POSIÇÃO DO MODELO publicada pela ponte modelo→banco (posicaoModelo(): primitivos do banco + derivados
    calculados aqui, data-base explícita). Estado (modo + valores digitados) persiste ao navegar entre vistas.
-   "{venda}" nos textos = data prevista de venda da posição. Valores iniciais dos campos partem do preço-alvo. */
+   "{venda}" nos textos = data prevista de venda da posição. Valores iniciais dos campos: última simulação do usuário
+   (banco, tabela simulacoes) ou, na primeira vez, o padrão calculado do preço-alvo. */
 const SIM_MODES={
   lote:{label:"Lote inteiro", explain:"Um valor total pelo rebanho inteiro, entregue agora. O preço por cabeça é o valor dividido pelas cabeças.",
     fields:[["total","Valor total da proposta (R$)",b=>Math.round(b.alvo*b.N/1000)*1000,1000]]},
@@ -1397,22 +1407,46 @@ const SIM_MODES={
   refugo:{label:"Comprador refuga", explain:"O comprador separa os refugos e leva o restante a um preço negociado. Os refugos ficam na propriedade até {venda} e são vendidos ao preço informado.",
     fields:[["q","Cabeças refugadas pelo comprador",b=>Math.round(b.N*0.1),1],["p1","Preço negociado pelos escolhidos (R$/cab)",b=>b.alvo-100,10],["p2","Preço dos refugos em {venda} (R$/cab)",b=>b.alvo-800,10]]}
 };
-const SIM_ST={modo:"lote",v:null,dataBase:null};
+const SIM_ST={modo:"lote",v:null,dataBase:null,origem:null,timer:null,salvoEm:null,salvoErro:null,ultimo:null};
+/* Entradas do Simulador: o padrão do modelo (preço-alvo × rebanho) só vale na primeira abertura — depois, o default é
+   sempre o último número digitado. Cada usuário tem a sua "última" simulação gravada no banco (tabela simulacoes, db/20;
+   cópia neste aparelho como reserva, caso o banco não responda) e pode guardar cenários com nome. Nada se apaga: um
+   cenário salvo com o mesmo nome é sobrescrito; sócios veem os cenários uns dos outros (só leitura — ao editar, vira a
+   última simulação de quem editou). */
+const simPadrao=b=>{const v={};for(const k in SIM_MODES){v[k]={};SIM_MODES[k].fields.forEach(f=>v[k][f[0]]=f[2](b));}return v;};
+const simMesclar=(padrao,salvo)=>{const v={};for(const k in SIM_MODES){v[k]={};SIM_MODES[k].fields.forEach(f=>{const s=salvo?.[k]?.[f[0]];v[k][f[0]]=(s!==null&&s!==""&&Number.isFinite(Number(s)))?Number(s):padrao[k][f[0]];});}return v;};
+const simEmail=()=>(D.email||"").toLowerCase();
+const simChaveLocal=nome=>"zk_sim_"+simEmail()+"_"+nome;
+function simUltima(){ /* última simulação do usuário: banco (D.sims) ou a cópia local, se for mais nova (editou sem gravar) */
+  const bd=D.sims.find(s=>(s.usuario_email||"").toLowerCase()===simEmail()&&s.nome==="ultima")||null;
+  let l=null;try{const t=localStorage.getItem(simChaveLocal("ultima"));if(t)l=JSON.parse(t);}catch(e){}
+  if(l&&(!bd||String(l.atualizado_em)>String(bd.atualizado_em)))return{...l,_local:true};
+  return bd;
+}
 function viewSimulador(main){
   const fmt=(v,d=2)=>v.toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
   const R=(v,d=2)=>"R$ "+fmt(v,d);
   const sgn=v=>(v>=0?"+":"−")+R(Math.abs(v),0);
   const pct=v=>(v*100).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})+"%";
+  const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const b=posicaoModelo();
   if(!b){main.replaceChildren(h("section",{class:"card sim"},
       h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Simulador de Venda do Lote ",h("span",{class:"selo prog"},"Projeção")),
       h("p",{class:"note"},"O Simulador usa a posição do modelo publicada pela ponte modelo→banco — ainda não há posição publicada neste ambiente. Rode a ponte no Mac (automacao/ponte_modelo.sh) e toque em Atualizar.")));return;}
   const vendaCurta=dmy(b.vendaData).slice(0,5), db=dmy(b.dataBase);
   const T=s=>s.replace(/\{venda\}/g,vendaCurta);
-  /* valores iniciais dos campos: calculados do preço-alvo e do rebanho da posição; recalculados quando a posição muda */
-  if(!SIM_ST.v||SIM_ST.dataBase!==b.dataBase){SIM_ST.v={};SIM_ST.dataBase=b.dataBase;for(const k in SIM_MODES){SIM_ST.v[k]={};SIM_MODES[k].fields.forEach(f=>SIM_ST.v[k][f[0]]=f[2](b));}}
+  /* primeira abertura na sessão: última simulação do usuário (banco ou cópia local); sem nenhuma, o padrão do modelo.
+     Posição nova do modelo NÃO zera o que foi digitado — os números são do usuário; cabeças acima do rebanho são
+     limitadas no cálculo. */
+  if(!SIM_ST.v){
+    const padrao=simPadrao(b), ult=simUltima();
+    if(ult){SIM_ST.v=simMesclar(padrao,ult.entradas);SIM_ST.modo=SIM_MODES[ult.modo]?ult.modo:"lote";SIM_ST.origem={tipo:"ultima",em:ult.atualizado_em,dataBase:ult.data_base,local:!!ult._local};}
+    else{SIM_ST.v=padrao;SIM_ST.origem={tipo:"padrao"};}
+  }
+  SIM_ST.dataBase=b.dataBase;
   const st=SIM_ST.v;
   const mesNome=new Date(b.dataBase+"T12:00:00").toLocaleDateString("pt-BR",{month:"long"});
+  const regras=`Regras fixas: o grupo que fica consome ração no ritmo vigente (${fmt(b.rkg,2)} kg/cab/dia a ${R(b.pkg,4)}/kg), termina o feno em estoque e carrega os fixos mensais até ${vendaCurta}; quando tudo é vendido hoje, a estrutura é considerada reocupada por novo lote (fixos fora deste ciclo). Fixos mensais pela regra "serviço pleno" (último mês realizado sem depreciação + depreciação plena); o mês da data-base entra pro-rata. Depreciação é custo sem caixa; imobilizado e estoque que sobram são ativos da sociedade. Sem impostos, comissão ou frete de saída.`;
 
   main.replaceChildren(h("section",{class:"card sim"},h("div",{id:"sv-root"})));
   const root=document.getElementById("sv-root");
@@ -1436,6 +1470,17 @@ function viewSimulador(main){
           <p class="explica" id="sv-explain"></p>
           <div class="sim-modegrid" id="sv-modeInputs"></div>
         </div>
+        <div class="sim-bar">
+          <span class="note" id="sv-estado" aria-live="polite"></span>
+          <div class="sim-acoes">
+            <select id="sv-salvas" class="sim-sel" aria-label="Simulações salvas"><option value="">Simulações salvas…</option></select>
+            <button class="btn sm" type="button" id="sv-salvarComo">Salvar como…</button>
+            <button class="btn sm" type="button" id="sv-repor" title="Volta os campos ao padrão calculado do preço-alvo e do rebanho da posição">Repor padrão do modelo</button>
+            <button class="btn sm" type="button" id="sv-csv" title="Planilha simples (abre no Excel/Numbers) com entradas, resultado, caixa e ração deste cenário">Baixar resumo (.csv)</button>
+            <button class="btn sm" type="button" id="sv-txt" title="O mesmo resumo em texto, para WhatsApp ou e-mail">Resumo em texto (.txt)</button>
+          </div>
+          <form id="sv-nomeForm" class="sim-nome" hidden><input type="text" id="sv-nome" maxlength="40" placeholder="nome do cenário (ex.: proposta 3.050 frente)" autocomplete="off"><button class="btn pri sm" type="submit">Salvar</button><button class="btn sm" type="button" id="sv-nomeCancel">Cancelar</button></form>
+        </div>
         <div class="kpis" id="sv-kpis"></div>
         <div class="sim-two">
           <div class="sim-panel"><h3>Resultado do ciclo por competência</h3><div class="tablewrap"><table id="sv-dre"></table></div></div>
@@ -1445,7 +1490,7 @@ function viewSimulador(main){
           <div class="sim-panel"><h3>Ração gasta até a data-base</h3><div class="tablewrap"><table id="sv-racHoje" class="wrapval"></table></div><p class="note" style="margin-top:8px;font-size:12px">Consumo reconstruído por fases na aba Consumo de Ração do modelo (RG1, RG2 e ração direta); fase vigente: ${b.fase}. Feno apontado na aba Estoque de Insumos (${fmt(b.fenoRolos,0)} rolos de ${fmt(b.fenoKgRolo,0)} kg).</p></div>
           <div class="sim-panel"><h3>Previsão de ração do grupo que fica</h3><div class="tablewrap"><table id="sv-racFut" class="wrapval"></table></div><p class="note" id="sv-racFutNote" style="margin-top:8px;font-size:12px"></p></div>
         </div>
-        <p class="hint">Regras fixas: o grupo que fica consome ração no ritmo vigente (${fmt(b.rkg,2)} kg/cab/dia a ${R(b.pkg,4)}/kg), termina o feno em estoque e carrega os fixos mensais até ${vendaCurta}; quando tudo é vendido hoje, a estrutura é considerada reocupada por novo lote (fixos fora deste ciclo). Fixos mensais pela regra "serviço pleno" (último mês realizado sem depreciação + depreciação plena); o mês da data-base entra pro-rata. Depreciação é custo sem caixa; imobilizado e estoque que sobram são ativos da sociedade. Sem impostos, comissão ou frete de saída.</p>
+        <p class="hint">${regras}</p>
       </div>
     </div>`;
   const $S=id=>root.querySelector("#sv-"+id);
@@ -1480,56 +1525,74 @@ function viewSimulador(main){
     if(SIM_ST.modo==="frente") return {n1:v.n1,p1:v.p1,d2:b.dias,p2:v.p2,m2:0,ociosa:false};
     return {n1:b.N-v.q,p1:v.p1,d2:b.dias,p2:v.p2,m2:0,ociosa:false};
   }
-  function row(l,a,b2,cls){return `<tr class="${cls||""}"><td>${l}</td><td class="n">${a}</td>${b2!==undefined?`<td class="n">${b2}</td>`:""}</tr>`;}
-
-  function calc(){
-    const s=scenario(), r=run(s);
-    const cls=v=>v>=0?"pos":"neg";
+  const cls=v=>v>=0?"pos":"neg";
+  /* linhas do resultado em estrutura única: a tela e os arquivos exportados saem das mesmas linhas (o que se baixa é
+     exatamente o que se vê). Cada linha = [rótulo, valor, valor 2 (opcional), classe da linha, classe do valor] */
+  function linhas(s,r){
     const grupo2=r.n2>0?(r.d2>0?`${r.n2} cab em ${vendaCurta} a ${R(s.p2,0)}`:`${r.n2} cab agora a ${R(s.p2,0)}`):"—";
-    $S("kpis").innerHTML=`
-      <div class="kpi"><div class="l">Receita total</div><div class="v">${R(r.rec,0)}</div><div class="s">${r.vend} cab · preço médio ${R(r.pm,0)}/cab</div></div>
-      <div class="kpi"><div class="l">Resultado do ciclo (competência)</div><div class="v ${cls(r.res)}">${sgn(r.res)}</div><div class="s">margem ${pct(r.margem)} · ${R(r.vend?r.res/r.vend:0,0)}/cab</div></div>
-      <div class="kpi"><div class="l">Custo completo por cabeça</div><div class="v">${R(r.custoCab,0)}</div><div class="s">breakeven do cenário</div></div>`;
-    $S("dre").innerHTML=`<tr><th>Item</th><th class="n">R$</th><th class="n">R$/cab vendida</th></tr>`+
-      row("Receita — grupo vendido agora ("+r.n1+" cab a "+R(s.p1,0)+")",R(r.rec1),R(r.vend?r.rec1/r.vend:0))+
-      row("Receita — restante ("+grupo2+")",R(r.rec2),R(r.vend?r.rec2/r.vend:0))+
-      row("Aquisição + frete + manejo",R(b.aq),R(b.aq/r.vend))+
-      row("Ração consumida até "+db,R(b.rac),R(b.rac/r.vend))+
-      row("Gastos operacionais do ciclo (OP)",R(b.op),R(b.op/r.vend))+
-      row("Fixos de produção + despesas até "+db,R(b.fixp+b.adm),R((b.fixp+b.adm)/r.vend))+
-      row(`Ração do grupo que fica (${r.n2} cab × ${fmt(b.rkg)} kg × ${r.d2} d × ${R(b.pkg,4)}/kg${r.fenoAdd?" + feno restante "+R(r.fenoAdd,0):""})`,R(r.racAdd),R(r.racAdd/r.vend))+
-      row(`Fixos até a venda do restante (${fmt(r.dFix,0)} dias, inclui depreciação ${R(r.depAdd,0)})`,R(r.fixAdd),R(r.fixAdd/r.vend))+
-      row("Outros gastos de venda",R(r.vendaC),R(r.vendaC/r.vend))+
-      row("<b>Gasto total do ciclo</b>",`<b>${R(r.gasto)}</b>`,`<b>${R(r.custoCab)}</b>`,"tot")+
-      row("<b>Resultado do ciclo</b>",`<b class="${cls(r.res)}">${sgn(r.res)}</b>`,`<b>${R(r.vend?r.res/r.vend:0)}</b>`,"tot");
-    $S("caixa").innerHTML=`<tr><th>Item</th><th class="n">R$</th></tr>`+
-      row("Desembolsado até "+db+" (base do Rateio)",R(b.desemb))+row(b.prorata>0?"Fixos de "+mesNome+" a pagar (pro-rata)":"Fixos do mês da data-base (já realizados)",R(b.apagar))+
-      row("Compras de ração ainda necessárias (além do estoque)",R(r.racCompra))+row("Fixos a pagar até a venda do restante (sem depreciação)",R(r.fixAdd-r.depAdd))+row("Outros gastos de venda",R(r.vendaC))+
-      row("<b>Compromisso de caixa do ciclo</b>",`<b>${R(r.comp)}</b>`,undefined,"tot")+
-      row("Receita total",R(r.rec))+row("<b>Saldo de caixa do ciclo</b>",`<b class="${cls(r.saldo)}">${sgn(r.saldo)}</b>`,undefined,"tot")+
-      row("Imobilizado líquido que fica com a sociedade",R(r.imobLiq),undefined,"sub")+row("Estoque de insumos que fica (ração + feno + mineral + núcleos)",R(r.estFinal),undefined,"sub")+
-      row("<b>Resultado econômico (caixa + ativos)</b>",`<b class="${cls(r.econ)}">${sgn(r.econ)}</b>`,undefined,"tot");
-    $S("econNote").textContent="Conciliação: resultado econômico − resultado por competência = "+R(r.econ-r.res)+" (deve ser zero). Breakeven de caixa do cenário: "+R(r.vend?r.comp/r.vend:0,0)+"/cab.";
+    const porCab=v=>R(r.vend?v/r.vend:0);
+    const kpis=[["Receita total",R(r.rec,0),`${r.vend} cab · preço médio ${R(r.pm,0)}/cab`,""],
+      ["Resultado do ciclo (competência)",sgn(r.res),`margem ${pct(r.margem)} · ${R(r.vend?r.res/r.vend:0,0)}/cab`,cls(r.res)],
+      ["Custo completo por cabeça",R(r.custoCab,0),"breakeven do cenário",""]];
+    const dre=[["Receita — grupo vendido agora ("+r.n1+" cab a "+R(s.p1,0)+")",R(r.rec1),porCab(r.rec1)],
+      ["Receita — restante ("+grupo2+")",R(r.rec2),porCab(r.rec2)],
+      ["Aquisição + frete + manejo",R(b.aq),porCab(b.aq)],
+      ["Ração consumida até "+db,R(b.rac),porCab(b.rac)],
+      ["Gastos operacionais do ciclo (OP)",R(b.op),porCab(b.op)],
+      ["Fixos de produção + despesas até "+db,R(b.fixp+b.adm),porCab(b.fixp+b.adm)],
+      [`Ração do grupo que fica (${r.n2} cab × ${fmt(b.rkg)} kg × ${r.d2} d × ${R(b.pkg,4)}/kg${r.fenoAdd?" + feno restante "+R(r.fenoAdd,0):""})`,R(r.racAdd),porCab(r.racAdd)],
+      [`Fixos até a venda do restante (${fmt(r.dFix,0)} dias, inclui depreciação ${R(r.depAdd,0)})`,R(r.fixAdd),porCab(r.fixAdd)],
+      ["Outros gastos de venda",R(r.vendaC),porCab(r.vendaC)],
+      ["Gasto total do ciclo",R(r.gasto),R(r.custoCab),"tot"],
+      ["Resultado do ciclo",sgn(r.res),R(r.vend?r.res/r.vend:0),"tot",cls(r.res)]];
+    const caixa=[["Desembolsado até "+db+" (base do Rateio)",R(b.desemb)],
+      [b.prorata>0?"Fixos de "+mesNome+" a pagar (pro-rata)":"Fixos do mês da data-base (já realizados)",R(b.apagar)],
+      ["Compras de ração ainda necessárias (além do estoque)",R(r.racCompra)],
+      ["Fixos a pagar até a venda do restante (sem depreciação)",R(r.fixAdd-r.depAdd)],
+      ["Outros gastos de venda",R(r.vendaC)],
+      ["Compromisso de caixa do ciclo",R(r.comp),undefined,"tot"],
+      ["Receita total",R(r.rec)],
+      ["Saldo de caixa do ciclo",sgn(r.saldo),undefined,"tot",cls(r.saldo)],
+      ["Imobilizado líquido que fica com a sociedade",R(r.imobLiq),undefined,"sub"],
+      ["Estoque de insumos que fica (ração + feno + mineral + núcleos)",R(r.estFinal),undefined,"sub"],
+      ["Resultado econômico (caixa + ativos)",sgn(r.econ),undefined,"tot",cls(r.econ)]];
+    const econNote="Conciliação: resultado econômico − resultado por competência = "+R(r.econ-r.res)+" (deve ser zero). Breakeven de caixa do cenário: "+R(r.vend?r.comp/r.vend:0,0)+"/cab.";
     const kgCab=b.kgHoje/b.N, rsCab=b.rac/b.N;
-    $S("racHoje").innerHTML=`<tr><th>Item</th><th class="n">Valor</th></tr>`+
-      row("Ração base consumida pelo lote ("+dmy(b.inicio)+" → "+db+")",fmt(b.kgHoje,0)+" kg · "+R(b.racBase))+row("Feno apontado ("+fmt(b.fenoRolos,0)+" rolos × "+fmt(b.fenoKgRolo,0)+" kg)",fmt(b.fenoRolos,0)+" rolos · "+fmt(b.fenoKg,0)+" kg · "+R(b.feno))+
-      row("Custo total da alimentação consumida",R(b.rac))+row("Custo médio ponderado da ração base",R(b.kgHoje?b.racBase/b.kgHoje:0,4)+"/kg")+row("Por cabeça ("+b.N+" cab)",fmt(kgCab,0)+" kg de ração base · "+R(rsCab))+
-      row("Fase vigente — "+b.fase,fmt(b.rkg*b.N,0)+" kg/dia · "+fmt(b.rkg,2)+" kg/cab/dia · "+R(b.pkg,4)+"/kg")+
-      row("Estoque de ração base em "+db,fmt(b.estKg,0)+" kg · "+R(b.estrac))+row("Feno em estoque",R(b.estfeno)+" · "+fmt(b.estfenoRolos,0)+" rolos")+row("Mineral à vontade (Phoscerrado)",R(b.estmin)+" · "+fmt(b.mineralKg,0)+" kg");
+    const racHoje=[["Ração base consumida pelo lote ("+dmy(b.inicio)+" → "+db+")",fmt(b.kgHoje,0)+" kg · "+R(b.racBase)],
+      ["Feno apontado ("+fmt(b.fenoRolos,0)+" rolos × "+fmt(b.fenoKgRolo,0)+" kg)",fmt(b.fenoRolos,0)+" rolos · "+fmt(b.fenoKg,0)+" kg · "+R(b.feno)],
+      ["Custo total da alimentação consumida",R(b.rac)],["Custo médio ponderado da ração base",R(b.kgHoje?b.racBase/b.kgHoje:0,4)+"/kg"],
+      ["Por cabeça ("+b.N+" cab)",fmt(kgCab,0)+" kg de ração base · "+R(rsCab)],
+      ["Fase vigente — "+b.fase,fmt(b.rkg*b.N,0)+" kg/dia · "+fmt(b.rkg,2)+" kg/cab/dia · "+R(b.pkg,4)+"/kg"],
+      ["Estoque de ração base em "+db,fmt(b.estKg,0)+" kg · "+R(b.estrac)],["Feno em estoque",R(b.estfeno)+" · "+fmt(b.estfenoRolos,0)+" rolos"],["Mineral à vontade (Phoscerrado)",R(b.estmin)+" · "+fmt(b.mineralKg,0)+" kg"]];
+    let racFut,racFutNote;
     if(r.n2>0){
       const kgFut=r.n2*b.rkg*r.d2, autonomia=b.estKg/(r.n2*b.rkg);
-      $S("racFut").innerHTML=`<tr><th>Item</th><th class="n">Valor</th></tr>`+
-        row("Cabeças que ficam",r.n2+" cab")+row("Dias na propriedade (até "+vendaCurta+")",r.d2+" dias")+
-        row("Consumo diário do grupo",fmt(r.n2*b.rkg,0)+" kg/dia · "+R(r.n2*b.rcd))+
-        row("Ração prevista até a venda",fmt(kgFut,0)+" kg · "+R(r.racAdd-r.fenoAdd)+(r.fenoAdd?" + feno "+R(r.fenoAdd,0):""))+
-        row("Coberto pelo estoque atual",fmt(Math.min(kgFut,b.estKg),0)+" kg · "+R(Math.min(r.racAdd-r.fenoAdd,b.estrac)))+
-        row("Compra necessária além do estoque",fmt(Math.max(0,kgFut-b.estKg),0)+" kg · "+R(r.racCompra),undefined,"tot")+
-        row("Por cabeça que fica",fmt(b.rkg*r.d2,0)+" kg · "+R(b.rcd*r.d2));
-      $S("racFutNote").textContent="Autonomia do estoque atual para esse grupo: "+fmt(autonomia,0)+" dias. Ritmo fixo da fase vigente; o consumo acompanha o peso vivo e tende a subir conforme as novilhas crescem.";
+      racFut=[["Cabeças que ficam",r.n2+" cab"],["Dias na propriedade (até "+vendaCurta+")",r.d2+" dias"],
+        ["Consumo diário do grupo",fmt(r.n2*b.rkg,0)+" kg/dia · "+R(r.n2*b.rcd)],
+        ["Ração prevista até a venda",fmt(kgFut,0)+" kg · "+R(r.racAdd-r.fenoAdd)+(r.fenoAdd?" + feno "+R(r.fenoAdd,0):"")],
+        ["Coberto pelo estoque atual",fmt(Math.min(kgFut,b.estKg),0)+" kg · "+R(Math.min(r.racAdd-r.fenoAdd,b.estrac))],
+        ["Compra necessária além do estoque",fmt(Math.max(0,kgFut-b.estKg),0)+" kg · "+R(r.racCompra),undefined,"tot"],
+        ["Por cabeça que fica",fmt(b.rkg*r.d2,0)+" kg · "+R(b.rcd*r.d2)]];
+      racFutNote="Autonomia do estoque atual para esse grupo: "+fmt(autonomia,0)+" dias. Ritmo fixo da fase vigente; o consumo acompanha o peso vivo e tende a subir conforme as novilhas crescem.";
     }else{
-      $S("racFut").innerHTML=`<tr><th>Item</th><th class="n">Valor</th></tr>`+row("Cabeças que ficam","0 cab")+row("Ração futura deste lote",R(0))+row("Estoque que fica para o próximo lote",fmt(b.estKg,0)+" kg · "+R(b.estrac))+row("Feno, mineral e núcleos que ficam",R(b.estfeno+b.estmin+b.estoutros));
-      $S("racFutNote").textContent="Tudo vendido hoje: não há ração futura; o estoque é ativo da sociedade para o próximo lote.";
+      racFut=[["Cabeças que ficam","0 cab"],["Ração futura deste lote",R(0)],["Estoque que fica para o próximo lote",fmt(b.estKg,0)+" kg · "+R(b.estrac)],["Feno, mineral e núcleos que ficam",R(b.estfeno+b.estmin+b.estoutros)]];
+      racFutNote="Tudo vendido hoje: não há ração futura; o estoque é ativo da sociedade para o próximo lote.";
     }
+    return {kpis,dre,caixa,econNote,racHoje,racFut,racFutNote};
+  }
+  const row=(l,a,b2,c,vc)=>`<tr class="${c||""}"><td>${l}</td><td class="n ${vc||""}">${a}</td>${b2!==undefined?`<td class="n">${b2}</td>`:""}</tr>`;
+  const tabela=(cab,rs)=>`<tr>${cab.map((c,i)=>`<th${i?' class="n"':""}>${c}</th>`).join("")}</tr>`+rs.map(x=>row(...x)).join("");
+
+  function calc(){
+    const s=scenario(), r=run(s), L=linhas(s,r);
+    SIM_ST.ultimo={s,r,L};
+    $S("kpis").innerHTML=L.kpis.map(([l,v,sub,vc])=>`<div class="kpi"><div class="l">${l}</div><div class="v ${vc}">${v}</div><div class="s">${sub}</div></div>`).join("");
+    $S("dre").innerHTML=tabela(["Item","R$","R$/cab vendida"],L.dre);
+    $S("caixa").innerHTML=tabela(["Item","R$"],L.caixa);
+    $S("econNote").textContent=L.econNote;
+    $S("racHoje").innerHTML=tabela(["Item","Valor"],L.racHoje);
+    $S("racFut").innerHTML=tabela(["Item","Valor"],L.racFut);
+    $S("racFutNote").textContent=L.racFutNote;
   }
   function renderInputs(){
     const m=SIM_MODES[SIM_ST.modo]; $S("explain").textContent=T(m.explain);
@@ -1538,15 +1601,96 @@ function viewSimulador(main){
       const div=document.createElement("div"); div.className="sim-field";
       div.innerHTML=`<label for="sv-f-${id}">${T(label)}</label><input type="number" id="sv-f-${id}" step="${step}" value="${st[SIM_ST.modo][id]}">`;
       box.appendChild(div);
-      div.querySelector("input").addEventListener("input",e=>{st[SIM_ST.modo][id]=parseFloat(e.target.value)||0;calc();});
+      div.querySelector("input").addEventListener("input",e=>{st[SIM_ST.modo][id]=parseFloat(e.target.value)||0;calc();simAgendarSalvar();});
     });
     calc();
   }
+  const marcarAba=()=>root.querySelectorAll(".sim-tab").forEach(t=>t.setAttribute("aria-selected",t.dataset.mode===SIM_ST.modo?"true":"false"));
   root.querySelectorAll(".sim-tab").forEach(t=>{
-    t.setAttribute("aria-selected",t.dataset.mode===SIM_ST.modo?"true":"false");
-    t.addEventListener("click",()=>{root.querySelectorAll(".sim-tab").forEach(x=>x.setAttribute("aria-selected","false"));t.setAttribute("aria-selected","true");SIM_ST.modo=t.dataset.mode;renderInputs();});
+    t.addEventListener("click",()=>{SIM_ST.modo=t.dataset.mode;marcarAba();renderInputs();simAgendarSalvar();});
   });
-  renderInputs();
+
+  /* ---- persistência: última simulação (automática) e cenários com nome ---- */
+  function estado(){
+    const el=$S("estado");if(!el)return;
+    const o=SIM_ST.origem||{tipo:"padrao"};let t;
+    if(o.tipo==="padrao")t="Entradas: padrão do modelo (preço-alvo × rebanho). Ao editar, seus números ficam guardados como sua última simulação.";
+    else if(o.tipo==="ultima")t=`Entradas: sua última simulação, salva em ${fmtPub(o.em)}`+(o.dataBase&&o.dataBase!==b.dataBase?` sobre a posição de ${dmy(o.dataBase)} — a posição do modelo já é de ${db}; seus números foram mantidos`:"")+(o.local?" (cópia guardada neste aparelho, mais nova que a do banco)":"")+".";
+    else t=`Entradas: cenário "${o.nome}" de ${o.de} (salvo em ${fmtPub(o.em)}). Ao editar, vira a sua última simulação.`;
+    if(SIM_ST.salvoErro)t+=` Não gravou no banco (${SIM_ST.salvoErro}); guardado neste aparelho.`;
+    else if(SIM_ST.salvoEm)t+=` Salvo às ${new Date(SIM_ST.salvoEm).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}.`;
+    el.textContent=t;
+  }
+  function resultadoResumo(){const r=SIM_ST.ultimo?.r;return r?{receita:Math.round(r.rec),resultado:Math.round(r.res),custo_cab:Math.round(r.custoCab),saldo_caixa:Math.round(r.saldo),resultado_economico:Math.round(r.econ),cab_vendidas:r.vend,preco_medio:Math.round(r.pm)}:null;}
+  async function simSalvar(nome){
+    const reg={usuario_email:simEmail(),nome,modo:SIM_ST.modo,entradas:SIM_ST.v,resultado:resultadoResumo(),posicao_id:D.posicao?.id||null,data_base:b.dataBase,atualizado_em:new Date().toISOString()};
+    try{localStorage.setItem(simChaveLocal(nome),JSON.stringify(reg));}catch(e){}
+    if(!reg.usuario_email){SIM_ST.salvoErro="sem usuário";estado();return null;}
+    try{
+      const{data,error}=await sb.from("simulacoes").upsert(reg,{onConflict:"usuario_email,nome"}).select().single();
+      if(error)throw error;
+      const linha=data||reg, i=D.sims.findIndex(s=>(s.usuario_email||"").toLowerCase()===reg.usuario_email&&s.nome===nome);
+      if(i>=0)D.sims[i]=linha;else D.sims.unshift(linha);
+      SIM_ST.salvoErro=null;SIM_ST.salvoEm=linha.atualizado_em;
+      if(nome==="ultima"&&SIM_ST.origem?.tipo==="padrao")SIM_ST.origem={tipo:"ultima",em:linha.atualizado_em,dataBase:b.dataBase};
+      estado();return linha;
+    }catch(e){SIM_ST.salvoErro=e?.message||String(e);estado();return null;}
+  }
+  function simAgendarSalvar(){clearTimeout(SIM_ST.timer);SIM_ST.timer=setTimeout(()=>simSalvar("ultima"),1200);}
+  function listarSalvas(){
+    const sel=$S("salvas"),eu=simEmail();
+    const minhas=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()===eu&&s.nome!=="ultima");
+    const outras=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()!==eu);
+    const op=(s,pref)=>`<option value="${esc(s.id)}">${esc(pref+(s.nome==="ultima"?"última simulação":s.nome)+" — "+dmy(s.atualizado_em))}</option>`;
+    sel.innerHTML=`<option value="">Simulações salvas…</option>`+(minhas.length?`<optgroup label="Minhas">${minhas.map(s=>op(s,"")).join("")}</optgroup>`:"")+(outras.length?`<optgroup label="De outros sócios">${outras.map(s=>op(s,(s.usuario_email||"").split("@")[0]+": ")).join("")}</optgroup>`:"");
+  }
+  function aplicar(s,origem){const nv=simMesclar(simPadrao(b),s.entradas);for(const k in nv)st[k]=nv[k];SIM_ST.modo=SIM_MODES[s.modo]?s.modo:"lote";SIM_ST.origem=origem;SIM_ST.salvoEm=null;SIM_ST.salvoErro=null;marcarAba();renderInputs();estado();simAgendarSalvar();}
+  $S("salvas").addEventListener("change",e=>{const s=D.sims.find(x=>x.id===e.target.value);e.target.value="";if(!s)return;
+    aplicar(s,{tipo:"cenario",nome:s.nome==="ultima"?"última simulação":s.nome,de:(s.usuario_email||"").split("@")[0],em:s.atualizado_em});});
+  $S("repor").addEventListener("click",()=>{aplicar({entradas:simPadrao(b),modo:SIM_ST.modo},{tipo:"padrao"});});
+  $S("salvarComo").addEventListener("click",()=>{const f=$S("nomeForm");f.hidden=!f.hidden;if(!f.hidden)$S("nome").focus();});
+  $S("nomeCancel").addEventListener("click",()=>{$S("nomeForm").hidden=true;});
+  $S("nomeForm").addEventListener("submit",async e=>{e.preventDefault();const nome=$S("nome").value.trim().replace(/\s+/g," ");if(!nome||nome.toLowerCase()==="ultima")return;
+    const l=await simSalvar(nome);if(l){SIM_ST.origem={tipo:"cenario",nome,de:simEmail().split("@")[0],em:l.atualizado_em};$S("nomeForm").hidden=true;$S("nome").value="";listarSalvas();estado();}});
+
+  /* ---- resumo exportável: planilha simples (.csv) e texto (.txt), das mesmas linhas da tela ---- */
+  const strip=x=>String(x??"").replace(/<[^>]+>/g,"");
+  function resumoDados(){
+    const u=SIM_ST.ultimo;if(!u)return null;const m=SIM_MODES[SIM_ST.modo];
+    const agora=new Date();
+    return {
+      cabecalho:[["Simulador de Venda do Lote — resumo da simulação"],["Gerado em",fmtPub(agora.toISOString())+" por "+simEmail().split("@")[0]],
+        ["Posição do modelo","data-base "+db,"publicada em "+fmtPub(b.publicadoEm)],["Forma de venda",m.label],["Venda prevista do que fica",dmy(b.vendaData)+" · "+b.dias+" dias"],["Rebanho na propriedade",b.N+" cab"]],
+      entradas:m.fields.map(([id,label])=>[T(label),fmt(st[SIM_ST.modo][id],0)]),
+      kpis:u.L.kpis.map(k=>[k[0],strip(k[1]),strip(k[2])]),
+      dre:u.L.dre.map(x=>[strip(x[0]),strip(x[1]),strip(x[2])]),
+      caixa:u.L.caixa.map(x=>[strip(x[0]),strip(x[1])]),
+      racHoje:u.L.racHoje.map(x=>[strip(x[0]),strip(x[1])]),
+      racFut:u.L.racFut.map(x=>[strip(x[0]),strip(x[1])]),
+      notas:[u.L.econNote,u.L.racFutNote,regras]};
+  }
+  function csvTexto(){
+    const d=resumoDados();if(!d)return"";
+    const q=v=>{v=String(v??"");return /[;"\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};const L=r=>r.map(q).join(";");
+    const sec=(t,cab,rows)=>[t?[t]:null,cab,...rows].filter(Boolean).map(L);
+    return [...sec(null,null,d.cabecalho),"",...sec("ENTRADAS",["Campo","Valor"],d.entradas),"",...sec("RESULTADO",["Indicador","Valor","Detalhe"],d.kpis),"",
+      ...sec("RESULTADO DO CICLO POR COMPETÊNCIA",["Item","R$","R$/cab vendida"],d.dre),"",...sec("CAIXA DOS SÓCIOS",["Item","R$"],d.caixa),"",
+      ...sec("RAÇÃO GASTA ATÉ A DATA-BASE",["Item","Valor"],d.racHoje),"",...sec("PREVISÃO DE RAÇÃO DO GRUPO QUE FICA",["Item","Valor"],d.racFut),"",...sec("NOTAS",null,d.notas.map(n=>[n]))].join("\r\n");
+  }
+  function txtTexto(){
+    const d=resumoDados();if(!d)return"";
+    const linha=r=>r.length>1?`${r[0]}: ${r.slice(1).join(" · ")}`:r[0];
+    const sec=(t,rows)=>["",t.toUpperCase(),"-".repeat(Math.min(60,t.length+4)),...rows.map(linha)];
+    return [...d.cabecalho.map(linha),...sec("Entradas",d.entradas),...sec("Resultado",d.kpis),...sec("Resultado do ciclo por competência (R$ · R$/cab vendida)",d.dre),
+      ...sec("Caixa dos sócios",d.caixa),...sec("Ração gasta até a data-base",d.racHoje),...sec("Previsão de ração do grupo que fica",d.racFut),...sec("Notas",d.notas.map(n=>[n]))].join("\n");
+  }
+  function nomeArquivo(ext){const a=new Date(),p=n=>String(n).padStart(2,"0");return `simulacao_${SIM_ST.modo}_${a.getFullYear()}-${p(a.getMonth()+1)}-${p(a.getDate())}_${p(a.getHours())}${p(a.getMinutes())}.${ext}`;}
+  function baixar(nome,texto,tipo){const blob=new Blob(["﻿"+texto],{type:tipo});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=nome;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);}
+  $S("csv").addEventListener("click",()=>baixar(nomeArquivo("csv"),csvTexto(),"text/csv;charset=utf-8"));
+  $S("txt").addEventListener("click",()=>baixar(nomeArquivo("txt"),txtTexto(),"text/plain;charset=utf-8"));
+  window.SIM_API={csv:csvTexto,txt:txtTexto,dados:resumoDados}; // usado pelos testes (testes/harness.js)
+
+  marcarAba();listarSalvas();renderInputs();estado();
 }
 
 /* ---------- vista: relatórios ---------- */
