@@ -172,7 +172,7 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .badge{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .ev{border-top:1px dashed var(--line);padding:8px 0;font-size:14px}
 .ev .d{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
-.selo{display:inline-block;font-family:var(--f-mono);font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid currentColor;margin-left:6px}
+.selo{display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;flex-shrink:0;vertical-align:middle;box-sizing:border-box;min-height:20px;font-family:var(--f-mono);font-size:10px;font-weight:600;line-height:1;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px 3px 9px;border-radius:999px;border:1px solid currentColor;margin-left:6px}
 .selo.vig{color:var(--ok)} .selo.hist{color:var(--muted)} .selo.prog{color:var(--warn)} .selo.bad{color:var(--bad)}
 .ptabs{display:flex;gap:4px;flex-wrap:wrap;background:var(--soft);padding:3px;border-radius:8px}
 .ptabs button{border:0;background:transparent;color:var(--ink);font:600 12.5px var(--f-body);padding:5px 9px;border-radius:6px;cursor:pointer}
@@ -210,6 +210,12 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 @media (max-width:900px){.sim-grid{grid-template-columns:minmax(0,1fr)}}
 .sim-panel{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px;min-width:0}
 details.sim-panel summary{cursor:pointer;font-weight:600;font-size:13px;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
+details.sim-panel summary.sum-pos{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:6px;align-items:center}
+details.sim-panel summary.sum-pos .st{grid-column:1;line-height:1.3}
+details.sim-panel summary.sum-pos .st .nw{white-space:nowrap}
+details.sim-panel summary.sum-pos #sv-posSelo{grid-column:1;grid-row:2;display:flex}
+details.sim-panel summary.sum-pos #sv-posSelo .selo{margin-left:0}
+details.sim-panel summary.sum-pos::after{grid-column:2;grid-row:1 / span 2}
 details.sim-panel summary::-webkit-details-marker{display:none}
 details.sim-panel summary::after{content:"▸";color:var(--muted)}
 details.sim-panel[open] summary::after{content:"▾"}
@@ -1465,7 +1471,7 @@ function viewSimulador(main){
     <p class="note" style="max-width:72ch">Ferramenta de decisão: escolha a forma de venda, mude os números e veja na hora o resultado do ciclo por competência e por caixa. Só preços e quantidades de cabeças são editáveis; o restante vem da posição do modelo de ${db}. O que não é vendido agora permanece na propriedade e é vendido em ${dmy(b.vendaData)}.</p>
     <div class="sim-grid">
       <details class="sim-panel" open>
-        <summary>Posição do modelo — ${db} <span id="sv-posSelo"></span></summary>
+        <summary class="sum-pos"><span class="st">Posição do modelo · <span class="nw">${db}</span></span><span id="sv-posSelo"></span></summary>
         <div style="margin-top:10px" id="sv-baseList"></div>
         <p class="note" style="margin-top:8px;font-size:12px">Modelo Gestao_Agropecuaria_Dois_Amigos com data-base ${db}, publicado em ${fmtPub(b.publicadoEm)} (fase de ração vigente: ${b.fase}; ${b.mortes} morte(s) registrada(s); feno apontado ${fmt(b.fenoRolos,0)} rolos). Muda quando o modelo é recalculado e a ponte publica a nova posição.</p>
       </details>
