@@ -334,7 +334,8 @@ const CATALOGO_PREM=[
   ["peso_venda_kg_cab","Peso-alvo de venda (peso)","kg/cab","geral"],
   ["mortalidade_max_pct","Mortalidade máxima tolerada","%","geral"]]],
  ["Nutrição e suplementação",[
-  ["consumo_racao_kg_cab_dia","Consumo de ração","kg/cab/dia","geral"],
+  ["consumo_racao_kg_cab_dia","Consumo de ração — meta","kg/cab/dia","geral"],
+  ["consumo_racao_vigente_kg_cab_dia","Consumo de ração — ritmo vigente (modelo)","kg/cab/dia","geral"],
   ["consumo_mineral_g_cab_dia","Consumo de sal mineral","g/cab/dia","geral"],
   ["custo_racao_r_kg","Custo da ração","R$/kg","geral"],
   ["custo_cab_dia","Custo diário por cabeça","R$/cab/dia","geral"]]],
@@ -443,7 +444,7 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
 /* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
    Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
    O banco garante por RLS; aqui só se decide o que aparece na tela. */
@@ -469,10 +470,51 @@ async function carregar(){
     q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs,criado_em",["vigente_desde",{ascending:false}]),
     q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}]),
     /* leituras de chuva: tolerante — sem a tabela, o app segue funcionando com a lista vazia */
-    q("leituras_chuva","id,estrutura_id,data,mm,obs,autor_email,criado_em",["data",{ascending:false}]).catch(()=>[])]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],quando:new Date()});
+    q("leituras_chuva","id,estrutura_id,data,mm,obs,autor_email,criado_em",["data",{ascending:false}]).catch(()=>[]),
+    /* ponte modelo→banco (db/16): última posição publicada do modelo (sócio+; vazio para usuário padrão), mapa de fontes
+       das premissas e últimas execuções — todos tolerantes: sem a tabela ou sem permissão, seguem vazios */
+    sb.from("posicao_modelo").select("id,data_base,recalculado_em,arquivo_sha256,valores,origens,versao_catalogo,publicado_em").order("publicado_em",{ascending:false}).limit(1).then(({data})=>data&&data[0]||null).catch(()=>null),
+    q("premissas_fonte","chave,fonte,origem,consumidores,obs").catch(()=>[]),
+    sb.from("ponte_execucoes").select("iniciado_em,ambiente,modo,data_base,resultado,resumo").order("iniciado_em",{ascending:false}).limit(5).then(({data})=>data||[]).catch(()=>[])]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],quando:new Date()});
   salvarSnapshot();
 }
+/* ---------- posição do modelo (ponte modelo→banco) ----------
+   O banco guarda os PRIMITIVOS da planilha (ponte_catalogo.json); aqui se calculam os derivados do Simulador
+   a partir deles e da data-base — regras aprovadas em 27/10/2026:
+   · serviço pleno = último mês realizado sem a depreciação do mês + depreciação plena;
+   · pro-rata do mês corrente = dia da data-base ÷ dias do mês (0 se o mês já está realizado na matriz);
+   · depreciação já lançada = realizada na matriz (meses fechados) + plena × pro-rata do mês corrente;
+   · rebanho na propriedade = compradas − mortes + pré-existentes.
+   Identidade que o Simulador exige (conciliação = 0): gastoA + estoque + imobilizado líquido = desembolsado + a pagar. */
+const fonteDe=k=>D.premFonte.find(f=>f.chave===k)||null;
+const fonteModelo=k=>fonteDe(k)?.fonte==="modelo";
+const fmtPub=iso=>{if(!iso)return"—";const d=new Date(iso);return d.toLocaleDateString("pt-BR")+" "+d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});};
+function posicaoModelo(){
+  const P=D.posicao?.valores;if(!P)return null;
+  const db=D.posicao.data_base;const d=new Date(db+"T12:00:00");const dia=d.getDate();const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();
+  const prorata=(P.fixo_mes_ref===db.slice(0,7))?0:dia/dim;
+  const n=k=>Number(P[k]||0);
+  const b={dataBase:db,publicadoEm:D.posicao.publicado_em,prorata,diaMes:dia,diasMes:dim,mesRef:P.fixo_mes_ref,
+    compradas:n("cab_compradas"),mortes:n("mortes_refugos"),preex:n("cab_preexistentes"),vendaveis:n("cab_vendaveis"),
+    N:n("cab_compradas")-n("mortes_refugos")+n("cab_preexistentes"),dias:n("dias_restantes"),alvo:n("preco_alvo_rs_cab"),vendaData:P.data_venda,
+    aq:n("aquisicao_rs")+n("frete_aquisicao_rs")+n("manejo_sanitario_rs"),rac:n("racao_consumida_rs"),racBase:n("racao_base_rs"),kgHoje:n("racao_base_kg"),
+    feno:n("feno_apontado_rs"),fenoRolos:n("feno_rolos_apontados"),fenoKgRolo:n("feno_kg_rolo"),fenoKg:n("feno_rolos_apontados")*n("feno_kg_rolo"),
+    op:n("op_ciclo_rs"),fixm:n("fixo_pleno_mes_rs"),depm:n("depreciacao_mes_plena_rs"),
+    fixp:n("fixos_incorridos_producao_rs")+n("fixo_pleno_producao_rs")*prorata,adm:n("fixos_incorridos_adm_rs")+n("fixo_pleno_adm_rs")*prorata,
+    apagar:(n("fixo_pleno_mes_rs")-n("depreciacao_mes_plena_rs"))*prorata,
+    rkg:n("ritmo_kg_cab_dia"),pkg:n("custo_kg_rg3_rs"),venda:n("cab_vendaveis")?n("outros_previstos_rs")/n("cab_vendaveis"):0,
+    desemb:n("desembolsado_rs"),imob:n("imobilizado_rs"),deplan:n("fixo_depreciacao_acumulada_rs")+n("depreciacao_mes_plena_rs")*prorata,
+    estrac:n("estoque_racao_base_rs"),estKg:n("estoque_racao_base_kg"),estfeno:n("estoque_feno_rs"),estfenoRolos:n("feno_rolos_estoque"),estmin:n("estoque_mineral_rs"),estoutros:n("estoque_outros_rs"),
+    mineralKg:(P.estoque_itens||[]).filter(i=>i.classe==="mineral").reduce((s,i)=>s+Number(i.saldo||0),0),
+    fase:P.fase_vigente||"—",breakeven:n("breakeven_competencia_rs_cab"),breakevenCaixa:n("breakeven_caixa_rs_cab"),autonomia:n("autonomia_racao_dias"),
+    acumulado:n("gasto_acumulado_rs"),projetado:n("gasto_projetado_rs"),margemCab:n("margem_cab_rs"),saldoAndre:n("saldo_andre_rs"),cota:n("cota_socio_rs"),
+    desembAndre:n("desembolso_andre_rs"),desembDanilo:n("desembolso_danilo_rs"),estoqueVal:n("estoque_valor_rs"),comprasPrev:n("compras_previstas_rs"),
+    diasDec:n("dias_decorridos"),inicio:P.inicio_ciclo,custoCabDia:n("custo_cab_dia_rs"),ritmoDia:n("ritmo_kg_dia")};
+  b.rcd=b.rkg*b.pkg;b.gastoA=b.aq+b.rac+b.op+b.fixp+b.adm;
+  return b;
+}
+const posLinha=()=>D.posicao?"Posição do modelo de "+dmy(D.posicao.data_base)+" · publicada em "+fmtPub(D.posicao.publicado_em):"posição do modelo ainda não publicada";
 /* Snapshot local da última posição carregada — é o que o app mostra quando abre sem sinal (chave por ambiente). */
 const SNAP_KEY="zk_pos_"+SUPA_URL.replace("https://","").split(".")[0];
 function salvarSnapshot(){try{localStorage.setItem(SNAP_KEY,JSON.stringify({...D,quando:D.quando?D.quando.toISOString():null}));}catch(e){}}
@@ -1067,11 +1109,16 @@ function viewPremissas(main){
         h("label",{class:"f"},"Vale a partir de",desde),
         h("div",{class:"inline-edit"},ok,volta)));
     });
+    /* chave cuja fonte é o MODELO (premissas_fonte): só exibição — altera-se na planilha e a ponte propaga com vigência */
+    if(fonteModelo(p.chave)){const f=fonteDe(p.chave);
+      acao.append(h("span",{class:"selo hist",title:"Fonte: planilha-modelo · "+(f.origem||"")},"Fonte: modelo"),
+        h("div",{style:"font-size:11px;color:var(--muted);margin-top:4px"},f.origem||""));return tr;}
     acao.append(acoes);return tr;});
-  /* nova premissa: catálogo do contexto operacional + escopo estruturado (nada digitado à mão) */
+  /* nova premissa: catálogo do contexto operacional + escopo estruturado (nada digitado à mão);
+     chaves com fonte = modelo não se criam aqui (nascem na planilha e chegam pela ponte) */
   const selPrem=h("select",{},
     h("option",{value:""},"— escolha a premissa —"),
-    ...CATALOGO_PREM.map(([g,itens])=>h("optgroup",{label:g},...itens.map(([k,l,u])=>h("option",{value:k},l+" — "+u)))),
+    ...CATALOGO_PREM.map(([g,itens])=>h("optgroup",{label:g},...itens.map(([k,l,u])=>h("option",{value:k,disabled:fonteModelo(k)},l+" — "+u+(fonteModelo(k)?" · fonte: modelo":""))))),
     h("option",{value:"__outra"},"Outra (chave livre)"));
   const chaveLivre=h("input",{placeholder:"chave (ex.: minha_premissa)"});
   const unidadeLivre=h("input",{placeholder:"unidade (ex.: kg/cab/dia)"});
@@ -1103,10 +1150,28 @@ function viewPremissas(main){
     const{error}=await sb.from("premissas").insert({chave:chaveV,escopo:escopoV,valor:valorN.value.trim(),unidade:unidadeV,vigente_desde:hoje,autor_email:D.email});
     if(error){addBtn.textContent=/premissas_vigente_unica|duplicate/i.test(error.message)?"Já existe vigente nesse escopo — use Ajustar":"Falhou: "+error.message;addBtn.disabled=false;return;}
     await carregar();rerender();}},"Adicionar premissa");
+  /* mapa de fontes (premissas_fonte): uma chave, um dono — app (Painel) ou modelo (planilha, replicado pela ponte) */
+  const mapaFontes=D.premFonte.length?h("details",{class:"consulta"},h("summary",{},"Mapa de fontes das premissas — quem é o dono de cada chave"),
+    h("div",{class:"c-corpo"},
+      h("div",{class:"note"},"Fonte modelo: o valor nasce na planilha Gestao_Agropecuaria_Dois_Amigos e a ponte modelo→banco o replica com vigência (aqui só exibição). Fonte app: o valor nasce neste painel; a planilha não o conhece."),
+      h("div",{class:"tbl"},h("table",{class:"t-cards"},h("thead",{},h("tr",{},["Premissa","Fonte","Origem","Consome no app","Observação"].map(x=>h("th",{},x)))),
+        h("tbody",{},...[...D.premFonte].sort((a,b)=>(a.fonte+(PREM_LABELS[a.chave]||a.chave))<(b.fonte+(PREM_LABELS[b.chave]||b.chave))?-1:1).map(f=>h("tr",{},
+          h("td",{"data-l":"Premissa"},PREM_LABELS[f.chave]||f.chave),h("td",{"data-l":"Fonte"},h("span",{class:"selo "+(f.fonte==="modelo"?"hist":"vig")},f.fonte==="modelo"?"modelo":"app")),
+          h("td",{"data-l":"Origem"},f.origem||"—"),h("td",{"data-l":"Consome no app"},f.consumidores||"—"),h("td",{"data-l":"Observação"},f.obs||"—")))))))):null;
+  /* ponte modelo→banco: última posição publicada e últimas execuções (administrador) */
+  const ponteBloco=h("details",{class:"consulta"},h("summary",{},"Ponte modelo→banco — "+posLinha()),
+    h("div",{class:"c-corpo"},
+      D.posicao?h("dl",{class:"kv"},h("dt",{},"Data-base do modelo"),h("dd",{},dmy(D.posicao.data_base)),
+        h("dt",{},"Planilha recalculada em"),h("dd",{},fmtPub(D.posicao.recalculado_em)),h("dt",{},"Publicada em"),h("dd",{},fmtPub(D.posicao.publicado_em)),
+        h("dt",{},"Arquivo (sha256)"),h("dd",{},(D.posicao.arquivo_sha256||"").slice(0,12)+"…"),h("dt",{},"Catálogo"),h("dd",{},D.posicao.versao_catalogo||"—"))
+        :h("div",{class:"note"},"Nenhuma posição do modelo publicada ainda — rode a ponte no Mac (automacao/ponte_modelo.sh)."),
+      D.ponteExec.length?h("div",{},h("div",{class:"badge"},"Últimas execuções"),...D.ponteExec.map(e=>h("div",{class:"ev"},h("span",{class:"d"},fmtPub(e.iniciado_em)+" · "),
+        e.ambiente+" · "+e.modo+" · data-base "+dmy(e.data_base)+" · ",h("span",{class:"selo "+(e.resultado==="ok"?"vig":"bad")},e.resultado)))):null));
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Premissas",h("span",{class:"selo vig"},"Vigentes")),
-    h("p",{class:"note"},"Valores que alimentam fichas, Indicadores e Simulador. Ajustar encerra a vigência do valor atual e grava o novo a partir da data escolhida — o anterior fica no histórico, nada é apagado."),
+    h("p",{class:"note"},"Valores que alimentam fichas, Indicadores e Simulador. Ajustar encerra a vigência do valor atual e grava o novo a partir da data escolhida — o anterior fica no histórico, nada é apagado. Chaves com fonte = modelo mudam na planilha e chegam pela ponte."),
     h("div",{class:"tbl"},h("table",{class:"t-cards"},h("thead",{},h("tr",{},["Premissa","Escopo","Valor","Desde","Autor",""].map(x=>h("th",{},x)))),h("tbody",{},...linhas))),
+    mapaFontes,ponteBloco,
     h("div",{class:"regform"},h("div",{class:"badge"},"Nova premissa"),
       h("label",{class:"f"},"Premissa",selPrem),
       livreRow,
@@ -1134,17 +1199,18 @@ function viewIndicadores(main){
   const probAgua=(()=>{const porE={};D.insp.forEach(i=>{if(!porE[i.estrutura_id])porE[i.estrutura_id]=i;});
     return Object.values(porE).filter(i=>!(i.funcionamento&&i.limpeza&&i.qualidade)).length;})();
   const kpi=(v,l,s)=>h("div",{class:"kpi"},h("div",{class:"v"},v),h("div",{class:"l"},l),s?h("div",{class:"s"},s):null);
+  const pm=posicaoModelo();const pmTxt=pm?"modelo de "+dmy(pm.dataBase):"posição do modelo ainda não publicada";
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Indicadores"),
-    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"),
+    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"+(pm?" · "+posLinha():"")),
     h("div",{class:"kpis"},
       kpi(String(cab),"Cabeças vigentes",vig.map(m=>lote(m.lote_id)+" "+m.cabecas).join(" · ")),
       kpi(String(dias),"Dias até a venda prevista",dmy(V.data)+(D.socio?" · preço-alvo R$ "+nf(V.alvo,0)+"/cab":"")),
       kpi(nf(areaOc?cab/areaOc:0,1),"Lotação dos pastos ocupados (cab/ha)",nf(areaOc?UA(cab)/areaOc:0,2)+" UA/ha · ref. 0,75 UA/cab"),
       kpi(d7.length?nf(kg7/7/cab,2):"—","Consumo registrado (kg/cab/dia, 7 dias)",d7.length?nf(kg7,0)+" kg na semana":"sem apontamentos de Cocho ainda"),
       kpi(String(probAgua),"Pontos de Água com pendência",D.insp.length?"última inspeção por ponto":"sem inspeções registradas ainda"),
-      kpi("—","Autonomia do estoque","entra com a carga do estoque"),
-      D.socio?kpi("—","Custo acumulado por cabeça","entra com a integração com o modelo"):null)));
+      kpi(pm?nf(pm.autonomia,0)+" dias":"—","Autonomia da ração em estoque",pm?nf(pm.estKg,0)+" kg de ração base ÷ "+nf(pm.ritmoDia,0)+" kg/dia · "+pmTxt:D.socio?pmTxt:"posição do modelo (sócios)"),
+      D.socio?kpi(pm?"R$ "+nf(pm.acumulado/pm.vendaveis,0):"—","Gasto acumulado por cabeça vendável",pm?"breakeven projetado R$ "+nf(pm.breakeven,0)+"/cab · "+pmTxt:pmTxt):null)));
 }
 
 /* ---------- vista: consultas sob demanda (sócios) ----------
@@ -1273,50 +1339,72 @@ function viewConsultas(main){
     h("div",{class:"note"},"Texto operacional, sem valores financeiros — seguro para encaminhar."),
     pre,h("div",{class:"inline-edit"},btnCop,btnComp));
 
+  /* 10 — posição econômica do modelo (ponte modelo→banco; data-base explícita) */
+  const pm=posicaoModelo();
+  const R0=v=>"R$ "+nf(v,0);
+  const b10=bloco("10 · Posição econômica do modelo",
+    pm?[h("div",{class:"note"},posLinha()+" · "+pm.diasDec+" dias de ciclo desde "+dmy(pm.inicio)+" · "+pm.dias+" dias até a venda ("+dmy(pm.vendaData)+") ",h("span",{class:"selo prog"},"Projeção")),
+      tbl(["Indicador","Valor"],[
+        ["Breakeven por competência",R0(pm.breakeven)+"/cab"],["Breakeven de caixa",R0(pm.breakevenCaixa)+"/cab"],["Preço-alvo",R0(pm.alvo)+"/cab · margem "+R0(pm.margemCab)+"/cab"],
+        ["Gasto acumulado até a data-base",R0(pm.acumulado)+" · "+R0(pm.acumulado/pm.vendaveis)+"/cab vendável"],["Gasto total projetado até a venda",R0(pm.projetado)],
+        ["Desembolsado (caixa dos sócios)",R0(pm.desemb)+" · André "+R0(pm.desembAndre)+" · Danilo "+R0(pm.desembDanilo)],
+        ["Equalização",pm.saldoAndre>0?"Danilo paga a André "+R0(Math.abs(pm.saldoAndre)):pm.saldoAndre<0?"André paga a Danilo "+R0(Math.abs(pm.saldoAndre)):"zerada"],
+        ["Rebanho",pm.N+" cab na propriedade · "+pm.vendaveis+" vendáveis · "+pm.mortes+" morte(s)"],
+        ["Ração — fase vigente",pm.fase+" · "+nf(pm.rkg,2)+" kg/cab/dia · R$ "+nf(pm.custoCabDia,2)+"/cab/dia"],
+        ["Autonomia da ração em estoque",nf(pm.autonomia,0)+" dias · "+nf(pm.estKg,0)+" kg"],
+        ["Estoque de insumos",R0(pm.estoqueVal)+" · compras previstas até a venda "+R0(pm.comprasPrev)],
+        ["Imobilizado",R0(pm.imob)+" · depreciação plena "+R0(pm.depm)+"/mês"]].map(([l,v])=>h("tr",{},h("td",{},l),h("td",{class:"n"},v))))]
+      :h("div",{class:"note"},"Posição do modelo ainda não publicada — rode a ponte modelo→banco no Mac."));
+
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Consultas",h("span",{class:"selo vig"},"Posição vigente")),
     h("p",{class:"note"},"Respostas instantâneas calculadas da posição em "+(D.quando?D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"—")+". Toque numa consulta para abrir."),
-    b1,b2,b3,b4,b5,b6,b7,b8,b9));
+    b1,b2,b3,b4,b5,b6,b7,b8,b9,b10));
   desenhaTL();desenhaCons();
 }
 
 /* ---------- vista: simulador — venda do lote ---------- */
-/* Portado do simulador aprovado (anexo de 27/10). Só preços e quantidades de cabeças são
-   editáveis; o restante é fixo do modelo Gestao_Agropecuaria_Dois_Amigos recalculado em
-   22/10/2026. Estado (modo + valores digitados) persiste ao navegar entre vistas. */
-const SIM_BASE={N:168,dias:101,alvo:3100,aq:372502.50,rac:27168.26,racBase:23260.60,feno:3907.66,fenoRolos:30,fenoKg:6000,op:13943.47,fixp:36021.89,adm:1411.95,rkg:1.316,pkg:0.7566,kgHoje:27788,estKg:10672,fixm:8154.31,depm:918.34,venda:0,opp:0.01,
-  desemb:535659.73,apagar:5135.14,imob:80860.03,deplan:1806.10,estrac:7429.01,estfeno:2214.34,estfenoRolos:17,estmin:246.00,estoutros:803.52};
-SIM_BASE.rcd=SIM_BASE.rkg*SIM_BASE.pkg; SIM_BASE.gastoA=SIM_BASE.aq+SIM_BASE.rac+SIM_BASE.op+SIM_BASE.fixp+SIM_BASE.adm;
+/* Portado do simulador aprovado (anexo de 27/10). Só preços e quantidades de cabeças são editáveis; o restante
+   vem da POSIÇÃO DO MODELO publicada pela ponte modelo→banco (posicaoModelo(): primitivos do banco + derivados
+   calculados aqui, data-base explícita). Estado (modo + valores digitados) persiste ao navegar entre vistas.
+   "{venda}" nos textos = data prevista de venda da posição. Valores iniciais dos campos partem do preço-alvo. */
 const SIM_MODES={
   lote:{label:"Lote inteiro", explain:"Um valor total pelo rebanho inteiro, entregue agora. O preço por cabeça é o valor dividido pelas cabeças.",
-    fields:[["total","Valor total da proposta (R$)",480000,1000]]},
+    fields:[["total","Valor total da proposta (R$)",b=>Math.round(b.alvo*b.N/1000)*1000,1000]]},
   frentefundo:{label:"Frente + fundo agora", explain:"Todo o rebanho sai agora para o comprador, em dois preços: a frente e o fundo. O resultado é o preço médio ponderado do lote.",
-    fields:[["n1","Cabeças na frente",100,1],["p1","Preço da frente (R$/cab)",3100,10],["p2","Preço do fundo (R$/cab)",2650,10]]},
-  frente:{label:"Vender a frente, manter o fundo", explain:"Só a frente sai agora; o fundo fica na propriedade, consome ração e carrega os fixos até 31/01, quando é vendido ao preço informado. A frente pode ser maioria ou minoria do lote.",
-    fields:[["n1","Cabeças na frente (vendidas agora)",100,1],["p1","Preço da frente (R$/cab)",3100,10],["p2","Preço do fundo em 31/01 (R$/cab)",3100,10]]},
-  refugo:{label:"Comprador refuga", explain:"O comprador separa os refugos e leva o restante a um preço negociado. Os refugos ficam na propriedade até 31/01 e são vendidos ao preço informado.",
-    fields:[["q","Cabeças refugadas pelo comprador",16,1],["p1","Preço negociado pelos escolhidos (R$/cab)",3000,10],["p2","Preço dos refugos em 31/01 (R$/cab)",2300,10]]}
+    fields:[["n1","Cabeças na frente",b=>Math.round(b.N*0.6),1],["p1","Preço da frente (R$/cab)",b=>b.alvo,10],["p2","Preço do fundo (R$/cab)",b=>b.alvo-450,10]]},
+  frente:{label:"Vender a frente, manter o fundo", explain:"Só a frente sai agora; o fundo fica na propriedade, consome ração e carrega os fixos até {venda}, quando é vendido ao preço informado. A frente pode ser maioria ou minoria do lote.",
+    fields:[["n1","Cabeças na frente (vendidas agora)",b=>Math.round(b.N*0.6),1],["p1","Preço da frente (R$/cab)",b=>b.alvo,10],["p2","Preço do fundo em {venda} (R$/cab)",b=>b.alvo,10]]},
+  refugo:{label:"Comprador refuga", explain:"O comprador separa os refugos e leva o restante a um preço negociado. Os refugos ficam na propriedade até {venda} e são vendidos ao preço informado.",
+    fields:[["q","Cabeças refugadas pelo comprador",b=>Math.round(b.N*0.1),1],["p1","Preço negociado pelos escolhidos (R$/cab)",b=>b.alvo-100,10],["p2","Preço dos refugos em {venda} (R$/cab)",b=>b.alvo-800,10]]}
 };
-const SIM_ST={modo:"lote",v:null};
+const SIM_ST={modo:"lote",v:null,dataBase:null};
 function viewSimulador(main){
   const fmt=(v,d=2)=>v.toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
   const R=(v,d=2)=>"R$ "+fmt(v,d);
   const sgn=v=>(v>=0?"+":"−")+R(Math.abs(v),0);
   const pct=v=>(v*100).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})+"%";
-  const b=SIM_BASE;
-  if(!SIM_ST.v){SIM_ST.v={};for(const k in SIM_MODES){SIM_ST.v[k]={};SIM_MODES[k].fields.forEach(f=>SIM_ST.v[k][f[0]]=f[2]);}}
+  const b=posicaoModelo();
+  if(!b){main.replaceChildren(h("section",{class:"card sim"},
+      h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Simulador de Venda do Lote ",h("span",{class:"selo prog"},"Projeção")),
+      h("p",{class:"note"},"O Simulador usa a posição do modelo publicada pela ponte modelo→banco — ainda não há posição publicada neste ambiente. Rode a ponte no Mac (automacao/ponte_modelo.sh) e toque em Atualizar.")));return;}
+  const vendaCurta=dmy(b.vendaData).slice(0,5), db=dmy(b.dataBase);
+  const T=s=>s.replace(/\{venda\}/g,vendaCurta);
+  /* valores iniciais dos campos: calculados do preço-alvo e do rebanho da posição; recalculados quando a posição muda */
+  if(!SIM_ST.v||SIM_ST.dataBase!==b.dataBase){SIM_ST.v={};SIM_ST.dataBase=b.dataBase;for(const k in SIM_MODES){SIM_ST.v[k]={};SIM_MODES[k].fields.forEach(f=>SIM_ST.v[k][f[0]]=f[2](b));}}
   const st=SIM_ST.v;
+  const mesNome=new Date(b.dataBase+"T12:00:00").toLocaleDateString("pt-BR",{month:"long"});
 
   main.replaceChildren(h("section",{class:"card sim"},h("div",{id:"sv-root"})));
   const root=document.getElementById("sv-root");
   root.innerHTML=`
     <h2 style="font-family:var(--f-display);font-stretch:85%;margin:0 0 4px">Simulador de Venda do Lote <span class="selo prog">Projeção</span></h2>
-    <p class="note" style="max-width:72ch">Ferramenta de decisão: escolha a forma de venda, mude os números e veja na hora o resultado do ciclo por competência e por caixa. Só preços e quantidades de cabeças são editáveis; o restante vem do modelo recalculado em 22/10/2026 e fica fixo. O que não é vendido agora permanece na propriedade e é vendido em 31/01/2027.</p>
+    <p class="note" style="max-width:72ch">Ferramenta de decisão: escolha a forma de venda, mude os números e veja na hora o resultado do ciclo por competência e por caixa. Só preços e quantidades de cabeças são editáveis; o restante vem da posição do modelo de ${db}. O que não é vendido agora permanece na propriedade e é vendido em ${dmy(b.vendaData)}.</p>
     <div class="sim-grid">
       <details class="sim-panel" open>
-        <summary>Premissas do modelo (fixas — 22/10/2026)</summary>
+        <summary>Posição do modelo — ${db}</summary>
         <div style="margin-top:10px" id="sv-baseList"></div>
-        <p class="note" style="margin-top:8px;font-size:12px">Valores do modelo Gestao_Agropecuaria_Dois_Amigos recalculado em 22/10/2026 (feno apontado a 3 rolos/dia, manejo sanitário de 21/10, 3 mortes registradas). Só mudam quando o modelo é atualizado.</p>
+        <p class="note" style="margin-top:8px;font-size:12px">Modelo Gestao_Agropecuaria_Dois_Amigos com data-base ${db}, publicado em ${fmtPub(b.publicadoEm)} (fase de ração vigente: ${b.fase}; ${b.mortes} morte(s) registrada(s); feno apontado ${fmt(b.fenoRolos,0)} rolos). Muda quando o modelo é recalculado e a ponte publica a nova posição.</p>
       </details>
       <div>
         <div class="sim-tabs" role="tablist">
@@ -1335,18 +1423,18 @@ function viewSimulador(main){
           <div class="sim-panel"><h3>Caixa dos sócios</h3><div class="tablewrap"><table id="sv-caixa"></table></div><p class="note" id="sv-econNote" style="margin-top:8px;font-size:12px"></p></div>
         </div>
         <div class="sim-two">
-          <div class="sim-panel"><h3>Ração gasta até hoje</h3><div class="tablewrap"><table id="sv-racHoje" class="wrapval"></table></div><p class="note" style="margin-top:8px;font-size:12px">Consumo reconstruído por fases na aba Consumo de Ração do modelo (RG1, RG2 e ração direta); fase vigente 3b, ancorada na contagem de UPMIL de 12/10. Feno apontado pelo ritmo informado (3 rolos de 200 kg por dia).</p></div>
+          <div class="sim-panel"><h3>Ração gasta até a data-base</h3><div class="tablewrap"><table id="sv-racHoje" class="wrapval"></table></div><p class="note" style="margin-top:8px;font-size:12px">Consumo reconstruído por fases na aba Consumo de Ração do modelo (RG1, RG2 e ração direta); fase vigente: ${b.fase}. Feno apontado na aba Estoque de Insumos (${fmt(b.fenoRolos,0)} rolos de ${fmt(b.fenoKgRolo,0)} kg).</p></div>
           <div class="sim-panel"><h3>Previsão de ração do grupo que fica</h3><div class="tablewrap"><table id="sv-racFut" class="wrapval"></table></div><p class="note" id="sv-racFutNote" style="margin-top:8px;font-size:12px"></p></div>
         </div>
-        <p class="hint">Regras fixas: o grupo que fica consome ração no ritmo vigente (1,32 kg/cab/dia a R$ 0,7566/kg), termina o feno em estoque e carrega os fixos mensais até 31/01; quando tudo é vendido hoje, a estrutura é considerada reocupada por novo lote (fixos fora deste ciclo). Depreciação é custo sem caixa; imobilizado e estoque que sobram são ativos da sociedade. Sem impostos, comissão ou frete de saída.</p>
+        <p class="hint">Regras fixas: o grupo que fica consome ração no ritmo vigente (${fmt(b.rkg,2)} kg/cab/dia a ${R(b.pkg,4)}/kg), termina o feno em estoque e carrega os fixos mensais até ${vendaCurta}; quando tudo é vendido hoje, a estrutura é considerada reocupada por novo lote (fixos fora deste ciclo). Fixos mensais pela regra "serviço pleno" (último mês realizado sem depreciação + depreciação plena); o mês da data-base entra pro-rata. Depreciação é custo sem caixa; imobilizado e estoque que sobram são ativos da sociedade. Sem impostos, comissão ou frete de saída.</p>
       </div>
     </div>`;
   const $S=id=>root.querySelector("#sv-"+id);
 
-  const baseRows=[["Rebanho","168 cabeças na propriedade: 165 novilhas compradas vivas (168 − 3 mortes) + 3 pré-existentes sem custo de compra (1 vaca + 2 novilhas)"],["Venda prevista do que fica","31/01/2027 · 101 dias"],["Preço-alvo de referência","R$ 3.100/cab"],
-    ["Aquisição + frete + manejo sanitário",R(b.aq)],["Ração consumida até 22/10 (ração base + feno apontado)",R(b.rac)],["Gastos operacionais do ciclo (OP)",R(b.op)],["Fixos de produção jun–22/10 (com depreciação)",R(b.fixp)],["Despesas administrativas",R(b.adm)],
-    ["Ração do que fica","1,32 kg/cab/dia × R$ 0,7566/kg = R$ 1,00/cab-dia (+ 17 rolos de feno)"],["Fixos mensais por competência",R(b.fixm)+" (depreciação "+R(b.depm)+")"],["Custo de oportunidade do caixa","1,0% ao mês"],
-    ["Desembolsado até hoje (base do Rateio)",R(b.desemb)],["Fixos de outubro a pagar (1–22/10)",R(b.apagar)],["Imobilizado (cerca, pastagem, benfeitorias, sede)",R(b.imob)],["Depreciação já lançada",R(b.deplan)],["Estoque de ração / feno / mineral / núcleos de aves e suínos",R(b.estrac)+" (≈ 10,7 t) / "+R(b.estfeno)+" (17 rolos) / "+R(b.estmin)+" / "+R(b.estoutros)]];
+  const baseRows=[["Rebanho",`${b.N} cabeças na propriedade: ${b.compradas-b.mortes} compradas vivas (${b.compradas} − ${b.mortes} morte(s)) + ${b.preex} pré-existente(s) sem custo de compra`],["Venda prevista do que fica",dmy(b.vendaData)+" · "+b.dias+" dias"],["Preço-alvo de referência",R(b.alvo,0)+"/cab"],
+    ["Aquisição + frete + manejo sanitário",R(b.aq)],["Ração consumida até "+db+" (ração base + feno apontado)",R(b.rac)],["Gastos operacionais do ciclo (OP)",R(b.op)],["Fixos de produção até "+db+" (com depreciação)",R(b.fixp)],["Despesas administrativas",R(b.adm)],
+    ["Ração do que fica",fmt(b.rkg,2)+" kg/cab/dia × "+R(b.pkg,4)+"/kg = "+R(b.rcd,2)+"/cab-dia (+ "+fmt(b.estfenoRolos,0)+" rolos de feno)"],["Fixos mensais por competência (serviço pleno)",R(b.fixm)+" (depreciação "+R(b.depm)+")"],
+    ["Desembolsado até "+db+" (base do Rateio)",R(b.desemb)],[b.prorata>0?`Fixos de ${mesNome} a pagar (1–${b.diaMes}/${b.dataBase.slice(5,7)})`:"Fixos do mês da data-base","" +(b.prorata>0?R(b.apagar):"já realizados na matriz do modelo")],["Imobilizado (cerca, pastagem, benfeitorias, sede)",R(b.imob)],["Depreciação já lançada (meses fechados + pro-rata)",R(b.deplan)],["Estoque de ração / feno / mineral / núcleos de aves e suínos",R(b.estrac)+" (≈ "+fmt(b.estKg/1000,1)+" t) / "+R(b.estfeno)+" ("+fmt(b.estfenoRolos,0)+" rolos) / "+R(b.estmin)+" / "+R(b.estoutros)]];
   $S("baseList").innerHTML=baseRows.map(([l,v])=>`<div class="sim-brow"><span class="bl">${l}</span><span class="bv">${v}</span></div>`).join("");
   if(matchMedia("(max-width:900px)").matches) root.querySelector("details.sim-panel").removeAttribute("open");
 
@@ -1354,7 +1442,7 @@ function viewSimulador(main){
   function run(s){
     const n1=Math.max(0,Math.min(b.N,s.n1)), n2=b.N-n1, d2=n2>0?Math.max(0,s.d2):0, m2=Math.max(0,Math.min(n2,s.m2||0));
     const rec1=n1*s.p1, rec2=(n2-m2)*s.p2, rec=rec1+rec2, vend=n1+(n2-m2);
-    const fenoAdd=(n2>0&&d2>0)?b.estfeno:0; // os 17 rolos restantes acabam em ~6 dias com animais na propriedade
+    const fenoAdd=(n2>0&&d2>0)?b.estfeno:0; // o feno em estoque é consumido pelo grupo que fica
     const racAdd=n2*b.rcd*d2+fenoAdd;
     let dFix=d2; if(n2===0&&s.ociosa) dFix=b.dias;
     const fixAdd=b.fixm*dFix/30.4, depAdd=b.depm*dFix/30.4;
@@ -1377,7 +1465,7 @@ function viewSimulador(main){
   function calc(){
     const s=scenario(), r=run(s);
     const cls=v=>v>=0?"pos":"neg";
-    const grupo2=r.n2>0?(r.d2>0?`${r.n2} cab em 31/01 a ${R(s.p2,0)}`:`${r.n2} cab agora a ${R(s.p2,0)}`):"—";
+    const grupo2=r.n2>0?(r.d2>0?`${r.n2} cab em ${vendaCurta} a ${R(s.p2,0)}`:`${r.n2} cab agora a ${R(s.p2,0)}`):"—";
     $S("kpis").innerHTML=`
       <div class="kpi"><div class="l">Receita total</div><div class="v">${R(r.rec,0)}</div><div class="s">${r.vend} cab · preço médio ${R(r.pm,0)}/cab</div></div>
       <div class="kpi"><div class="l">Resultado do ciclo (competência)</div><div class="v ${cls(r.res)}">${sgn(r.res)}</div><div class="s">margem ${pct(r.margem)} · ${R(r.vend?r.res/r.vend:0,0)}/cab</div></div>
@@ -1386,16 +1474,16 @@ function viewSimulador(main){
       row("Receita — grupo vendido agora ("+r.n1+" cab a "+R(s.p1,0)+")",R(r.rec1),R(r.vend?r.rec1/r.vend:0))+
       row("Receita — restante ("+grupo2+")",R(r.rec2),R(r.vend?r.rec2/r.vend:0))+
       row("Aquisição + frete + manejo",R(b.aq),R(b.aq/r.vend))+
-      row("Ração consumida até hoje",R(b.rac),R(b.rac/r.vend))+
+      row("Ração consumida até "+db,R(b.rac),R(b.rac/r.vend))+
       row("Gastos operacionais do ciclo (OP)",R(b.op),R(b.op/r.vend))+
-      row("Fixos de produção + despesas até hoje",R(b.fixp+b.adm),R((b.fixp+b.adm)/r.vend))+
+      row("Fixos de produção + despesas até "+db,R(b.fixp+b.adm),R((b.fixp+b.adm)/r.vend))+
       row(`Ração do grupo que fica (${r.n2} cab × ${fmt(b.rkg)} kg × ${r.d2} d × ${R(b.pkg,4)}/kg${r.fenoAdd?" + feno restante "+R(r.fenoAdd,0):""})`,R(r.racAdd),R(r.racAdd/r.vend))+
       row(`Fixos até a venda do restante (${fmt(r.dFix,0)} dias, inclui depreciação ${R(r.depAdd,0)})`,R(r.fixAdd),R(r.fixAdd/r.vend))+
       row("Outros gastos de venda",R(r.vendaC),R(r.vendaC/r.vend))+
       row("<b>Gasto total do ciclo</b>",`<b>${R(r.gasto)}</b>`,`<b>${R(r.custoCab)}</b>`,"tot")+
       row("<b>Resultado do ciclo</b>",`<b class="${cls(r.res)}">${sgn(r.res)}</b>`,`<b>${R(r.vend?r.res/r.vend:0)}</b>`,"tot");
     $S("caixa").innerHTML=`<tr><th>Item</th><th class="n">R$</th></tr>`+
-      row("Desembolsado até hoje (base do Rateio)",R(b.desemb))+row("Fixos de outubro a pagar",R(b.apagar))+
+      row("Desembolsado até "+db+" (base do Rateio)",R(b.desemb))+row(b.prorata>0?"Fixos de "+mesNome+" a pagar (pro-rata)":"Fixos do mês da data-base (já realizados)",R(b.apagar))+
       row("Compras de ração ainda necessárias (além do estoque)",R(r.racCompra))+row("Fixos a pagar até a venda do restante (sem depreciação)",R(r.fixAdd-r.depAdd))+row("Outros gastos de venda",R(r.vendaC))+
       row("<b>Compromisso de caixa do ciclo</b>",`<b>${R(r.comp)}</b>`,undefined,"tot")+
       row("Receita total",R(r.rec))+row("<b>Saldo de caixa do ciclo</b>",`<b class="${cls(r.saldo)}">${sgn(r.saldo)}</b>`,undefined,"tot")+
@@ -1404,14 +1492,14 @@ function viewSimulador(main){
     $S("econNote").textContent="Conciliação: resultado econômico − resultado por competência = "+R(r.econ-r.res)+" (deve ser zero). Breakeven de caixa do cenário: "+R(r.vend?r.comp/r.vend:0,0)+"/cab.";
     const kgCab=b.kgHoje/b.N, rsCab=b.rac/b.N;
     $S("racHoje").innerHTML=`<tr><th>Item</th><th class="n">Valor</th></tr>`+
-      row("Ração base consumida pelo lote (jun → hoje)",fmt(b.kgHoje,0)+" kg · "+R(b.racBase))+row("Feno apontado (3 rolos/dia desde 12/10)",b.fenoRolos+" rolos · "+fmt(b.fenoKg,0)+" kg · "+R(b.feno))+
-      row("Custo total da alimentação consumida",R(b.rac))+row("Custo médio ponderado da ração base",R(b.racBase/b.kgHoje,4)+"/kg")+row("Por cabeça (168 cab)",fmt(kgCab,0)+" kg de ração base · "+R(rsCab))+
-      row("Fase vigente — ração direta (RG3)",fmt(b.rkg*b.N,0)+" kg/dia · "+fmt(b.rkg,2)+" kg/cab/dia · "+R(b.pkg,4)+"/kg")+
-      row("Estoque de ração base em 22/10",fmt(b.estKg,0)+" kg · "+R(b.estrac))+row("Feno em estoque",R(b.estfeno)+" · "+b.estfenoRolos+" rolos (acabam ≈ 27/10)")+row("Phoscerrado (mineral à vontade)",R(b.estmin)+" · 25 kg");
+      row("Ração base consumida pelo lote ("+dmy(b.inicio)+" → "+db+")",fmt(b.kgHoje,0)+" kg · "+R(b.racBase))+row("Feno apontado ("+fmt(b.fenoRolos,0)+" rolos × "+fmt(b.fenoKgRolo,0)+" kg)",fmt(b.fenoRolos,0)+" rolos · "+fmt(b.fenoKg,0)+" kg · "+R(b.feno))+
+      row("Custo total da alimentação consumida",R(b.rac))+row("Custo médio ponderado da ração base",R(b.kgHoje?b.racBase/b.kgHoje:0,4)+"/kg")+row("Por cabeça ("+b.N+" cab)",fmt(kgCab,0)+" kg de ração base · "+R(rsCab))+
+      row("Fase vigente — "+b.fase,fmt(b.rkg*b.N,0)+" kg/dia · "+fmt(b.rkg,2)+" kg/cab/dia · "+R(b.pkg,4)+"/kg")+
+      row("Estoque de ração base em "+db,fmt(b.estKg,0)+" kg · "+R(b.estrac))+row("Feno em estoque",R(b.estfeno)+" · "+fmt(b.estfenoRolos,0)+" rolos")+row("Mineral à vontade (Phoscerrado)",R(b.estmin)+" · "+fmt(b.mineralKg,0)+" kg");
     if(r.n2>0){
       const kgFut=r.n2*b.rkg*r.d2, autonomia=b.estKg/(r.n2*b.rkg);
       $S("racFut").innerHTML=`<tr><th>Item</th><th class="n">Valor</th></tr>`+
-        row("Cabeças que ficam",r.n2+" cab")+row("Dias na propriedade (até 31/01)",r.d2+" dias")+
+        row("Cabeças que ficam",r.n2+" cab")+row("Dias na propriedade (até "+vendaCurta+")",r.d2+" dias")+
         row("Consumo diário do grupo",fmt(r.n2*b.rkg,0)+" kg/dia · "+R(r.n2*b.rcd))+
         row("Ração prevista até a venda",fmt(kgFut,0)+" kg · "+R(r.racAdd-r.fenoAdd)+(r.fenoAdd?" + feno "+R(r.fenoAdd,0):""))+
         row("Coberto pelo estoque atual",fmt(Math.min(kgFut,b.estKg),0)+" kg · "+R(Math.min(r.racAdd-r.fenoAdd,b.estrac)))+
@@ -1424,11 +1512,11 @@ function viewSimulador(main){
     }
   }
   function renderInputs(){
-    const m=SIM_MODES[SIM_ST.modo]; $S("explain").textContent=m.explain;
+    const m=SIM_MODES[SIM_ST.modo]; $S("explain").textContent=T(m.explain);
     const box=$S("modeInputs"); box.innerHTML="";
     m.fields.forEach(([id,label,def,step])=>{
       const div=document.createElement("div"); div.className="sim-field";
-      div.innerHTML=`<label for="sv-f-${id}">${label}</label><input type="number" id="sv-f-${id}" step="${step}" value="${st[SIM_ST.modo][id]}">`;
+      div.innerHTML=`<label for="sv-f-${id}">${T(label)}</label><input type="number" id="sv-f-${id}" step="${step}" value="${st[SIM_ST.modo][id]}">`;
       box.appendChild(div);
       div.querySelector("input").addEventListener("input",e=>{st[SIM_ST.modo][id]=parseFloat(e.target.value)||0;calc();});
     });
