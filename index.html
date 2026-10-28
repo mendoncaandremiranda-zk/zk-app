@@ -239,9 +239,11 @@ details.sim-panel[open] summary::after{content:"▾"}
 .sim .tablewrap{overflow-x:auto}
 .sim .hint{font-size:12px;color:var(--muted);margin-top:12px;max-width:80ch}
 .sim-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;margin:10px 0 0}
-.sim-bar .note{flex:1 1 280px;font-size:12px}
-.sim-acoes{display:flex;flex-wrap:wrap;gap:6px}
-.sim-sel{font:600 12.5px var(--f-body);padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);max-width:260px}
+.sim-bar .note{flex:1 1 100%;font-size:12px}
+.sim-acoes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%}
+.sim-acoes>*{width:100%;min-height:34px;margin:0;box-sizing:border-box;text-align:center}
+@media (max-width:640px){.sim-acoes{grid-template-columns:repeat(2,minmax(0,1fr))}.sim-acoes>*{min-height:44px}}
+.sim-sel{font:600 12.5px var(--f-body);padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);text-align:left}
 .sim-nome{display:flex;gap:6px;flex-wrap:wrap;width:100%}
 .sim-nome[hidden]{display:none}
 .sim-nome input{flex:1;min-width:200px;font:500 13px var(--f-body);padding:6px 8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px}
@@ -1481,7 +1483,7 @@ function viewSimulador(main){
         <div class="sim-bar">
           <span class="note" id="sv-estado" aria-live="polite"></span>
           <div class="sim-acoes">
-            <select id="sv-salvas" class="sim-sel" aria-label="Simulações salvas"><option value="">Simulações salvas…</option></select>
+            <select id="sv-salvas" class="sim-sel" aria-label="Simulações salvas"><option value="">Abrir salva…</option></select>
             <button class="btn sm" type="button" id="sv-salvarComo">Salvar como…</button>
             <button class="btn sm" type="button" id="sv-xlsx" title="Planilha Excel com entradas, resultado, caixa e ração deste cenário">Resumo em Excel</button>
             <button class="btn sm" type="button" id="sv-pdf" title="Abre a impressão só com o resumo — escolha Salvar como PDF">Resumo em PDF</button>
@@ -1649,7 +1651,7 @@ function viewSimulador(main){
     const minhas=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()===eu&&s.nome!=="ultima");
     const outras=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()!==eu);
     const op=(s,pref)=>`<option value="${esc(s.id)}">${esc(pref+(s.nome==="ultima"?"última simulação":s.nome)+" — "+dmy(s.atualizado_em))}</option>`;
-    sel.innerHTML=`<option value="">Simulações salvas…</option>`+(minhas.length?`<optgroup label="Minhas">${minhas.map(s=>op(s,"")).join("")}</optgroup>`:"")+(outras.length?`<optgroup label="De outros sócios">${outras.map(s=>op(s,(s.usuario_email||"").split("@")[0]+": ")).join("")}</optgroup>`:"");
+    sel.innerHTML=`<option value="">Abrir salva…</option>`+(minhas.length?`<optgroup label="Minhas">${minhas.map(s=>op(s,"")).join("")}</optgroup>`:"")+(outras.length?`<optgroup label="De outros sócios">${outras.map(s=>op(s,(s.usuario_email||"").split("@")[0]+": ")).join("")}</optgroup>`:"");
   }
   function aplicar(s,origem){const nv=simMesclar(simPadrao(b),s.entradas);for(const k in nv)st[k]=nv[k];SIM_ST.modo=SIM_MODES[s.modo]?s.modo:"lote";SIM_ST.origem=origem;SIM_ST.salvoEm=null;SIM_ST.salvoErro=null;marcarAba();renderInputs();estado();simAgendarSalvar();}
   $S("salvas").addEventListener("change",e=>{const s=D.sims.find(x=>x.id===e.target.value);e.target.value="";if(!s)return;
