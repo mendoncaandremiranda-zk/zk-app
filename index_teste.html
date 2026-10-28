@@ -202,6 +202,8 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .kpi .v{font-family:var(--f-display);font-stretch:85%;font-weight:800;font-size:28px;font-variant-numeric:tabular-nums}
 .kpi .l{font-size:13px;color:var(--muted)}
 .kpi .s{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:4px}
+.kpi .t{font:600 11px var(--f-body);color:var(--accent);margin-top:2px;letter-spacing:.01em}
+.kpi .t .nw{white-space:nowrap}
 .kpis.kpis4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width:900px){.kpis.kpis4{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:420px){.kpis.kpis4{gap:8px}.kpis.kpis4 .kpi{padding:12px}.kpis.kpis4 .kpi .v{font-size:23px}}
@@ -1256,7 +1258,8 @@ function viewIndicadores(main){
   const kg7=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
   const probAgua=(()=>{const porE={};D.insp.forEach(i=>{if(!porE[i.estrutura_id])porE[i.estrutura_id]=i;});
     return Object.values(porE).filter(i=>!(i.funcionamento&&i.limpeza&&i.qualidade)).length;})();
-  const kpi=(v,l,s,cls)=>h("div",{class:"kpi"},h("div",{class:"v"+(cls?" "+cls:"")},v),h("div",{class:"l"},l),s?h("div",{class:"s"},s):null);
+  const kpi=(v,l,s,cls,tag)=>h("div",{class:"kpi"},h("div",{class:"v"+(cls?" "+cls:"")},v),h("div",{class:"l"},l),tag?h("div",{class:"t"},...[].concat(tag).map((x,i,a)=>i===a.length-1&&a.length>1?h("span",{class:"nw"},x):x)):null,s?h("div",{class:"s"},s):null);
+  const dmyCurto=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||"");return m?`${m[3]}/${m[2]}/${m[1].slice(2)}`:"";};
   const pm=posicaoModelo();const pmTxt=pm?"modelo de "+dmy(pm.dataBase):"posição do modelo ainda não publicada";
   /* 4 operacionais (todos os papéis) + 4 financeiros (só sócio e administrador — decisão de 28/10/2026; o banco já
      restringe a posição do modelo por RLS, aqui o bloco nem é montado para o usuário padrão) */
@@ -1268,9 +1271,9 @@ function viewIndicadores(main){
     kpi(String(probAgua),"Água com pendência",D.insp.length?"pontos · última inspeção":"sem inspeções registradas")];
   const P=D.posicao?.valores||{};
   const fin=pm?[
-    kpi(R0i(pm.breakeven),"Breakeven competência","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakeven),pm.alvo-pm.breakeven>=0?"pos":"neg"),
-    kpi(R0i(pm.breakevenCaixa),"Breakeven caixa","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakevenCaixa),pm.alvo-pm.breakevenCaixa>=0?"pos":"neg"),
-    kpi(R0i(pm.acumulado/pm.vendaveis),"Gasto acumulado/cab",R0i(pm.acumulado)+" · "+nf(pm.vendaveis,0)+" cab vendáveis"),
+    kpi(R0i(pm.breakeven),"Breakeven competência","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakeven),pm.alvo-pm.breakeven>=0?"pos":"neg",["projetado até ",dmyCurto(pm.vendaData)]),
+    kpi(R0i(pm.breakevenCaixa),"Breakeven caixa","alvo "+R0i(pm.alvo)+" · margem "+sgnR(pm.alvo-pm.breakevenCaixa),pm.alvo-pm.breakevenCaixa>=0?"pos":"neg",["projetado até ",dmyCurto(pm.vendaData)]),
+    kpi(R0i(pm.acumulado/pm.vendaveis),"Gasto acumulado/cab",R0i(pm.acumulado)+" · "+nf(pm.vendaveis,0)+" cab vendáveis",null,["do início do ciclo ","até hoje"]),
     kpi("R$ "+nf(Number(P.gasto_agregado_cab_dia_rs||0),2),"Gasto por cab/dia","ração R$ "+nf(pm.custoCabDia,2)+" + demais")]:
     [h("div",{class:"note"},pmTxt)];
   const grupo=(titulo,selo,itens)=>h("div",{class:"kpi-grupo"},h("div",{class:"kpi-tit"},h("span",{},titulo),selo),h("div",{class:"kpis kpis4"},...itens));
