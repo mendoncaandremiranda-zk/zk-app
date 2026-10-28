@@ -522,6 +522,14 @@ function posicaoModelo(){
   return b;
 }
 const posLinha=()=>D.posicao?"Posição do modelo de "+dmy(D.posicao.data_base)+" · publicada em "+fmtPub(D.posicao.publicado_em):"posição do modelo ainda não publicada";
+/* vigência da ponte: idade da posição (dias desde a data-base) e última execução/auditoria — selo de alerta acima de 7 dias
+   ou quando a última execução não terminou em "ok" */
+const posIdade=()=>D.posicao?Math.max(0,Math.floor((Date.now()-new Date(D.posicao.data_base+"T12:00:00"))/86400000)):null;
+const ponteUltima=modo=>D.ponteExec.find(e=>!modo||e.modo===modo)||null;
+const posSelo=()=>{const id=posIdade();if(id==null)return h("span",{class:"selo bad"},"sem posição");
+  const ult=ponteUltima();const aud=ponteUltima("auditoria");const ruim=(ult&&ult.resultado!=="ok")||(aud&&aud.resultado!=="ok");
+  const txt=id===0?"posição de hoje":id===1?"posição de ontem":"posição com "+id+" dias";
+  return h("span",{class:"selo "+(id>7||ruim?"bad":"vig"),title:(ult?"última execução da ponte: "+fmtPub(ult.iniciado_em)+" · "+ult.modo+" · "+ult.resultado:"")+(aud?" · auditoria: "+aud.resultado:"")},txt+(ruim?" · ponte com erro":""));};
 /* Snapshot local da última posição carregada — é o que o app mostra quando abre sem sinal (chave por ambiente). */
 const SNAP_KEY="zk_pos_"+SUPA_URL.replace("https://","").split(".")[0];
 function salvarSnapshot(){try{localStorage.setItem(SNAP_KEY,JSON.stringify({...D,quando:D.quando?D.quando.toISOString():null}));}catch(e){}}
@@ -1168,14 +1176,16 @@ function viewPremissas(main){
           h("td",{"data-l":"Premissa"},PREM_LABELS[f.chave]||f.chave),h("td",{"data-l":"Fonte"},h("span",{class:"selo "+(f.fonte==="modelo"?"hist":"vig")},f.fonte==="modelo"?"modelo":"app")),
           h("td",{"data-l":"Origem"},f.origem||"—"),h("td",{"data-l":"Consome no app"},f.consumidores||"—"),h("td",{"data-l":"Observação"},f.obs||"—")))))))):null;
   /* ponte modelo→banco: última posição publicada e últimas execuções (administrador) */
-  const ponteBloco=h("details",{class:"consulta"},h("summary",{},"Ponte modelo→banco — "+posLinha()),
+  const ponteBloco=h("details",{class:"consulta"},h("summary",{},"Ponte modelo→banco — "+posLinha()+" ",posSelo()),
     h("div",{class:"c-corpo"},
       D.posicao?h("dl",{class:"kv"},h("dt",{},"Data-base do modelo"),h("dd",{},dmy(D.posicao.data_base)),
         h("dt",{},"Planilha recalculada em"),h("dd",{},fmtPub(D.posicao.recalculado_em)),h("dt",{},"Publicada em"),h("dd",{},fmtPub(D.posicao.publicado_em)),
         h("dt",{},"Arquivo (sha256)"),h("dd",{},(D.posicao.arquivo_sha256||"").slice(0,12)+"…"),h("dt",{},"Catálogo"),h("dd",{},D.posicao.versao_catalogo||"—"))
         :h("div",{class:"note"},"Nenhuma posição do modelo publicada ainda — rode a ponte no Mac (automacao/ponte_modelo.sh)."),
       D.ponteExec.length?h("div",{},h("div",{class:"badge"},"Últimas execuções"),...D.ponteExec.map(e=>h("div",{class:"ev"},h("span",{class:"d"},fmtPub(e.iniciado_em)+" · "),
-        e.ambiente+" · "+e.modo+" · data-base "+dmy(e.data_base)+" · ",h("span",{class:"selo "+(e.resultado==="ok"?"vig":"bad")},e.resultado)))):null));
+        e.ambiente+" · "+e.modo+(e.data_base?" · data-base "+dmy(e.data_base):"")+" · ",h("span",{class:"selo "+(e.resultado==="ok"?"vig":"bad")},e.resultado),
+        e.modo==="auditoria"&&e.resumo?h("div",{class:"d"},(e.resumo.espelho||"")+(e.resumo.problemas?" · PROBLEMAS: "+e.resumo.problemas:"")+(e.resumo.avisos?" · avisos: "+e.resumo.avisos:"")):
+        e.modo==="exportar"&&e.resumo?h("div",{class:"d"},"export: "+(e.resumo.tabelas_ok??"?")+" tabela(s) · "+(e.resumo.linhas??"?")+" linha(s) → "+(e.resumo.destino||"")):null))):null));
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Premissas",h("span",{class:"selo vig"},"Vigentes")),
     h("p",{class:"note"},"Valores que alimentam fichas, Indicadores e Simulador. Ajustar encerra a vigência do valor atual e grava o novo a partir da data escolhida — o anterior fica no histórico, nada é apagado. Chaves com fonte = modelo mudam na planilha e chegam pela ponte."),
@@ -1211,7 +1221,7 @@ function viewIndicadores(main){
   const pm=posicaoModelo();const pmTxt=pm?"modelo de "+dmy(pm.dataBase):"posição do modelo ainda não publicada";
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Indicadores"),
-    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"+(pm?" · "+posLinha():"")),
+    h("p",{class:"note"},"Recomputados do banco agora · venda prevista "+dmy(V.data)+" (projeção)"+(pm?" · "+posLinha()+" ":""),pm?posSelo():null),
     h("div",{class:"kpis"},
       kpi(String(cab),"Cabeças vigentes",vig.map(m=>lote(m.lote_id)+" "+m.cabecas).join(" · ")),
       kpi(String(dias),"Dias até a venda prevista",dmy(V.data)+(D.socio?" · preço-alvo R$ "+nf(V.alvo,0)+"/cab":"")),
@@ -1352,7 +1362,7 @@ function viewConsultas(main){
   const pm=posicaoModelo();
   const R0=v=>"R$ "+nf(v,0);
   const b10=bloco("10 · Posição econômica do modelo",
-    pm?[h("div",{class:"note"},posLinha()+" · "+pm.diasDec+" dias de ciclo desde "+dmy(pm.inicio)+" · "+pm.dias+" dias até a venda ("+dmy(pm.vendaData)+") ",h("span",{class:"selo prog"},"Projeção")),
+    pm?[h("div",{class:"note"},posLinha()+" · "+pm.diasDec+" dias de ciclo desde "+dmy(pm.inicio)+" · "+pm.dias+" dias até a venda ("+dmy(pm.vendaData)+") ",h("span",{class:"selo prog"},"Projeção")," ",posSelo()),
       tbl(["Indicador","Valor"],[
         ["Breakeven por competência",R0(pm.breakeven)+"/cab"],["Breakeven de caixa",R0(pm.breakevenCaixa)+"/cab"],["Preço-alvo",R0(pm.alvo)+"/cab · margem "+R0(pm.margemCab)+"/cab"],
         ["Gasto acumulado até a data-base",R0(pm.acumulado)+" · "+R0(pm.acumulado/pm.vendaveis)+"/cab vendável"],["Gasto total projetado até a venda",R0(pm.projetado)],
@@ -1411,7 +1421,7 @@ function viewSimulador(main){
     <p class="note" style="max-width:72ch">Ferramenta de decisão: escolha a forma de venda, mude os números e veja na hora o resultado do ciclo por competência e por caixa. Só preços e quantidades de cabeças são editáveis; o restante vem da posição do modelo de ${db}. O que não é vendido agora permanece na propriedade e é vendido em ${dmy(b.vendaData)}.</p>
     <div class="sim-grid">
       <details class="sim-panel" open>
-        <summary>Posição do modelo — ${db}</summary>
+        <summary>Posição do modelo — ${db} <span id="sv-posSelo"></span></summary>
         <div style="margin-top:10px" id="sv-baseList"></div>
         <p class="note" style="margin-top:8px;font-size:12px">Modelo Gestao_Agropecuaria_Dois_Amigos com data-base ${db}, publicado em ${fmtPub(b.publicadoEm)} (fase de ração vigente: ${b.fase}; ${b.mortes} morte(s) registrada(s); feno apontado ${fmt(b.fenoRolos,0)} rolos). Muda quando o modelo é recalculado e a ponte publica a nova posição.</p>
       </details>
@@ -1445,6 +1455,7 @@ function viewSimulador(main){
     ["Ração do que fica",fmt(b.rkg,2)+" kg/cab/dia × "+R(b.pkg,4)+"/kg = "+R(b.rcd,2)+"/cab-dia (+ "+fmt(b.estfenoRolos,0)+" rolos de feno)"],["Fixos mensais por competência (serviço pleno)",R(b.fixm)+" (depreciação "+R(b.depm)+")"],
     ["Desembolsado até "+db+" (base do Rateio)",R(b.desemb)],[b.prorata>0?`Fixos de ${mesNome} a pagar (1–${b.diaMes}/${b.dataBase.slice(5,7)})`:"Fixos do mês da data-base","" +(b.prorata>0?R(b.apagar):"já realizados na matriz do modelo")],["Imobilizado (cerca, pastagem, benfeitorias, sede)",R(b.imob)],["Depreciação já lançada (meses fechados + pro-rata)",R(b.deplan)],["Estoque de ração / feno / mineral / núcleos de aves e suínos",R(b.estrac)+" (≈ "+fmt(b.estKg/1000,1)+" t) / "+R(b.estfeno)+" ("+fmt(b.estfenoRolos,0)+" rolos) / "+R(b.estmin)+" / "+R(b.estoutros)]];
   $S("baseList").innerHTML=baseRows.map(([l,v])=>`<div class="sim-brow"><span class="bl">${l}</span><span class="bv">${v}</span></div>`).join("");
+  $S("posSelo").replaceChildren(posSelo());
   if(matchMedia("(max-width:900px)").matches) root.querySelector("details.sim-panel").removeAttribute("open");
 
   // cenário genérico: grupo 1 vendido agora (n1,p1); grupo 2 (n2) vendido em d2 dias a p2; ociosa = fixos continuam sem animais
