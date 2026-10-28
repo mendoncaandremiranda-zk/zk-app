@@ -1614,9 +1614,19 @@ function viewSimulador(main){
     const box=$S("modeInputs"); box.innerHTML="";
     m.fields.forEach(([id,label,def,step])=>{
       const div=document.createElement("div"); div.className="sim-field";
-      div.innerHTML=`<label for="sv-f-${id}">${T(label)}</label><input type="number" id="sv-f-${id}" step="${step}" value="${st[SIM_ST.modo][id]}">`;
+      /* campo de texto numérico com ponto de milhar (pt-BR) enquanto se digita; o valor guardado é o número inteiro */
+      const milhar=v=>Math.round(Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:0});
+      div.innerHTML=`<label for="sv-f-${id}">${T(label)}</label><input type="text" inputmode="numeric" autocomplete="off" id="sv-f-${id}" value="${milhar(st[SIM_ST.modo][id])}">`;
       box.appendChild(div);
-      div.querySelector("input").addEventListener("input",e=>{st[SIM_ST.modo][id]=parseFloat(e.target.value)||0;calc();simAgendarSalvar();});
+      const inp=div.querySelector("input");
+      inp.addEventListener("input",()=>{
+        const pos=inp.selectionStart??inp.value.length, digAntes=inp.value.slice(0,pos).replace(/\D/g,"").length;
+        const dig=inp.value.replace(/\D/g,"").replace(/^0+(?=\d)/,"");
+        const v=dig?Number(dig):0; inp.value=dig?milhar(v):"";
+        let k=0,np=0; while(np<inp.value.length&&k<digAntes){if(/\d/.test(inp.value[np]))k++;np++;}
+        try{inp.setSelectionRange(np,np);}catch(e){}
+        st[SIM_ST.modo][id]=v;calc();simAgendarSalvar();});
+      inp.addEventListener("blur",()=>{inp.value=milhar(st[SIM_ST.modo][id]);});
     });
     calc();
   }
