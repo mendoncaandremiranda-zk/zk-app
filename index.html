@@ -247,6 +247,7 @@ details.sim-panel[open] summary::after{content:"▾"}
 .sim-nome input{flex:1;min-width:200px;font:500 13px var(--f-body);padding:6px 8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px}
 @media (pointer:coarse){.sim-field input{min-height:40px}}
 .note{font-size:13px;color:var(--muted)}
+.ph h3 .area-ha{font:500 0.8em var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
 details.pasta-rel{margin-top:8px;border:1px dashed var(--line);border-radius:8px;padding:2px 12px}
 details.pasta-rel summary{cursor:pointer;font:600 13px var(--f-body);color:var(--muted);padding:8px 0;list-style:none}
 details.pasta-rel summary::-webkit-details-marker{display:none}
@@ -876,7 +877,7 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
     if(hist.length)corpo.push(h("div",{class:"badge"},"Ocupações encerradas",h("span",{class:"selo hist"},"Histórico")),
       ...hist.map(m=>h("div",{class:"ev"},h("span",{class:"d"},dmy(m.entrada)+" → "+dmy(m.saida)+" · "),lote(m.lote_id)+" · "+m.cabecas+" cab")));
   }
-  const kidsP=[h("div",{class:"ficha-top"},tabs,h("div",{class:"ph"},h("h3",{},p.nome),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar"))),...corpo,
+  const kidsP=[h("div",{class:"ficha-top"},tabs,h("div",{class:"ph"},h("h3",{},p.nome,p.area_oficial_ha!=null&&p.area_oficial_ha!==""?h("span",{class:"area-ha"}," · "+nf(p.area_oficial_ha,2)+" ha"):null),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar"))),...corpo,
     (painelTab==="solo"||painelTab==="agua_cocho")?null:fotoStrip("pasto",p.id,painelTab)].filter(Boolean);
   pn.replaceChildren(...kidsP);
   mostrarFicha(pn);
