@@ -258,9 +258,20 @@ details.sim-panel[open] summary::after{content:"▾"}
 .sim-acoes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%}
 .sim-acoes>*{width:100%;min-height:34px;margin:0;box-sizing:border-box;text-align:center}
 @media (max-width:640px){.sim-acoes{grid-template-columns:repeat(2,minmax(0,1fr))}.sim-acoes>*{min-height:44px}}
-.sim-sel{font:600 12.5px var(--f-body);padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);text-align:left}
 .sim-nome{display:flex;gap:6px;flex-wrap:wrap;width:100%}
-.sim-nome[hidden]{display:none}
+.sim-nome[hidden],.sim-lista[hidden]{display:none}
+.sim-aviso{flex:1 1 100%;margin:2px 0 0;font-size:12px}.sim-aviso.bad{color:var(--bad)}
+.sim-lista{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:4px 12px 8px}
+.sim-lista-tit{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:10px 0 4px;font:700 11.5px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.sim-lista-tit .selo{margin-left:0}
+.sim-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px dashed var(--line)}
+.sim-item .si-nome{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
+.sim-item .si-meta{font:11px var(--f-mono);color:var(--muted);margin-top:2px}
+.sim-item .si-meta .nw{white-space:nowrap}
+.sim-item .si-acoes{display:grid;grid-template-columns:repeat(2,84px);gap:6px}
+.sim-item .si-acoes .btn{width:100%;margin:0}
+.sim-item .si-del{color:var(--bad)}.sim-item .si-del.conf{background:var(--bad);border-color:var(--bad);color:#fff}
+@media (max-width:640px){.sim-item{grid-template-columns:minmax(0,1fr);gap:8px}.sim-item .si-acoes{grid-template-columns:repeat(2,minmax(0,1fr))}.sim-item .si-acoes .btn{min-height:40px}.sim-item .si-meta{line-height:1.5}}
 .sim-nome input{flex:1;min-width:200px;font:500 13px var(--f-body);padding:6px 8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px}
 @media (pointer:coarse){.sim-field input{min-height:40px}}
 .note{font-size:13px;color:var(--muted)}
@@ -1517,12 +1528,13 @@ function viewSimulador(main){
         <div class="sim-bar">
           <span class="note" id="sv-estado" aria-live="polite"></span>
           <div class="sim-acoes">
-            <select id="sv-salvas" class="sim-sel" aria-label="Simulações salvas"><option value="">Abrir salva…</option></select>
+            <button class="btn sm" type="button" id="sv-salvas" aria-expanded="false" aria-controls="sv-lista">Salvas</button>
             <button class="btn sm" type="button" id="sv-salvarComo">Salvar como…</button>
             <button class="btn sm" type="button" id="sv-xlsx" title="Planilha Excel com entradas, resultado, caixa e ração deste cenário">Resumo em Excel</button>
             <button class="btn sm" type="button" id="sv-pdf" title="Abre a impressão só com o resumo — escolha Salvar como PDF">Resumo em PDF</button>
           </div>
-          <form id="sv-nomeForm" class="sim-nome" hidden><input type="text" id="sv-nome" maxlength="40" placeholder="nome do cenário (ex.: proposta 3.050 frente)" autocomplete="off"><button class="btn pri sm" type="submit">Salvar</button><button class="btn sm" type="button" id="sv-nomeCancel">Cancelar</button></form>
+          <form id="sv-nomeForm" class="sim-nome" hidden><input type="text" id="sv-nome" maxlength="40" placeholder="nome do cenário (ex.: proposta 3.050 frente)" autocomplete="off"><button class="btn pri sm" type="submit">Salvar</button><button class="btn sm" type="button" id="sv-nomeCancel">Cancelar</button><p class="note sim-aviso" id="sv-nomeAviso"></p></form>
+          <div id="sv-lista" class="sim-lista" hidden></div>
         </div>
         <div class="kpis" id="sv-kpis"></div>
         <div class="sim-two">
@@ -1690,19 +1702,45 @@ function viewSimulador(main){
     }catch(e){SIM_ST.salvoErro=e?.message||String(e);estado();return null;}
   }
   function simAgendarSalvar(){clearTimeout(SIM_ST.timer);SIM_ST.timer=setTimeout(()=>simSalvar("ultima"),1200);}
+  /* simulações salvas: cada usuário guarda até SIM_MAX cenários com nome (decisão de 28/10/2026) e pode excluir os seus;
+     os dos outros sócios aparecem só para abrir. A "última simulação" (gravação automática) não conta no limite.
+     O banco garante o mesmo limite (gatilho em db/21) e só deixa cada um excluir as próprias. */
+  const SIM_MAX=6;
+  const eu=()=>simEmail();
+  const minhasSalvas=()=>D.sims.filter(s=>(s.usuario_email||"").toLowerCase()===eu()&&s.nome!=="ultima");
+  const MODO_CURTO={lote:"Lote inteiro",frentefundo:"Frente + fundo",frente:"Frente, fundo fica",refugo:"Comprador refuga"};
   function listarSalvas(){
-    const sel=$S("salvas"),eu=simEmail();
-    const minhas=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()===eu&&s.nome!=="ultima");
-    const outras=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()!==eu);
-    const op=(s,pref)=>`<option value="${esc(s.id)}">${esc(pref+(s.nome==="ultima"?"última simulação":s.nome)+" — "+dmy(s.atualizado_em))}</option>`;
-    sel.innerHTML=`<option value="">Abrir salva…</option>`+(minhas.length?`<optgroup label="Minhas">${minhas.map(s=>op(s,"")).join("")}</optgroup>`:"")+(outras.length?`<optgroup label="De outros sócios">${outras.map(s=>op(s,(s.usuario_email||"").split("@")[0]+": ")).join("")}</optgroup>`:"");
+    const minhas=minhasSalvas(), outras=D.sims.filter(s=>(s.usuario_email||"").toLowerCase()!==eu());
+    const bt=$S("salvas");bt.textContent=`Salvas · ${minhas.length} de ${SIM_MAX}`;
+    const linha=(s,minha)=>`<div class="sim-item" data-id="${esc(s.id)}"><div class="si-txt"><div class="si-nome">${esc(minha?s.nome:(s.usuario_email||"").split("@")[0]+": "+(s.nome==="ultima"?"última simulação":s.nome))}</div>`+
+      `<div class="si-meta"><span class="nw">${esc(MODO_CURTO[s.modo]||s.modo)}</span> · <span class="nw">posição ${esc(dmy(s.data_base))}</span> · <span class="nw">salva ${esc(fmtPub(s.atualizado_em))}</span></div></div>`+
+      `<div class="si-acoes"><button class="btn sm" type="button" data-acao="abrir">Abrir</button>${minha?`<button class="btn sm si-del" type="button" data-acao="excluir">Excluir</button>`:`<span></span>`}</div></div>`;
+    $S("lista").innerHTML=`<div class="sim-lista-tit"><span>Minhas simulações</span><span class="selo ${minhas.length>=SIM_MAX?"prog":"hist"}">${minhas.length} de ${SIM_MAX}</span></div>`+
+      (minhas.length?minhas.map(x=>linha(x,true)).join(""):`<p class="note">Nenhuma simulação salva. Use "Salvar como…" para guardar até ${SIM_MAX}.</p>`)+
+      (outras.length?`<div class="sim-lista-tit"><span>De outros sócios</span><span class="selo hist">só leitura</span></div>`+outras.map(x=>linha(x,false)).join(""):"");
   }
   function aplicar(s,origem){const nv=simMesclar(simPadrao(b),s.entradas);for(const k in nv)st[k]=nv[k];SIM_ST.modo=SIM_MODES[s.modo]?s.modo:"lote";SIM_ST.origem=origem;SIM_ST.salvoEm=null;SIM_ST.salvoErro=null;marcarAba();renderInputs();estado();simAgendarSalvar();}
-  $S("salvas").addEventListener("change",e=>{const s=D.sims.find(x=>x.id===e.target.value);e.target.value="";if(!s)return;
-    aplicar(s,{tipo:"cenario",nome:s.nome==="ultima"?"última simulação":s.nome,de:(s.usuario_email||"").split("@")[0],em:s.atualizado_em});});
-  $S("salvarComo").addEventListener("click",()=>{const f=$S("nomeForm");f.hidden=!f.hidden;if(!f.hidden)$S("nome").focus();});
+  async function excluir(s,btn){
+    btn.disabled=true;btn.textContent="Excluindo…";
+    try{const{error}=await sb.from("simulacoes").delete().eq("id",s.id);if(error)throw error;}
+    catch(e){btn.disabled=false;btn.textContent="Falhou";btn.title=e?.message||String(e);return;}
+    D.sims=D.sims.filter(x=>x.id!==s.id);try{localStorage.removeItem(simChaveLocal(s.nome));}catch(e){}
+    if(SIM_ST.origem?.tipo==="cenario"&&SIM_ST.origem.nome===s.nome&&SIM_ST.origem.de===eu().split("@")[0]){SIM_ST.origem={tipo:"ultima",em:new Date().toISOString(),dataBase:b.dataBase};simAgendarSalvar();}
+    listarSalvas();estado();atualizarAviso();
+  }
+  $S("salvas").addEventListener("click",()=>{const l=$S("lista");l.hidden=!l.hidden;$S("salvas").setAttribute("aria-expanded",String(!l.hidden));if(!l.hidden){$S("nomeForm").hidden=true;listarSalvas();}igualarKpis();});
+  $S("lista").addEventListener("click",e=>{const btn=e.target.closest("button[data-acao]");if(!btn)return;const s=D.sims.find(x=>x.id===btn.closest(".sim-item").dataset.id);if(!s)return;
+    if(btn.dataset.acao==="abrir"){aplicar(s,{tipo:"cenario",nome:s.nome==="ultima"?"última simulação":s.nome,de:(s.usuario_email||"").split("@")[0],em:s.atualizado_em});$S("lista").hidden=true;$S("salvas").setAttribute("aria-expanded","false");return;}
+    /* exclusão em dois toques: o primeiro pede confirmação (some em 4 s), o segundo exclui */
+    if(btn.dataset.conf!=="1"){btn.dataset.conf="1";btn.textContent="Confirmar";btn.classList.add("conf");clearTimeout(btn._t);btn._t=setTimeout(()=>{btn.dataset.conf="";btn.textContent="Excluir";btn.classList.remove("conf");},4000);return;}
+    clearTimeout(btn._t);excluir(s,btn);});
+  function atualizarAviso(){const n=minhasSalvas().length,av=$S("nomeAviso");if(!av)return;
+    av.textContent=n>=SIM_MAX?`Limite de ${SIM_MAX} simulações salvas. Exclua uma em "Salvas" para guardar outra, ou repita o nome de uma existente para substituí-la.`:`Você tem ${n} de ${SIM_MAX} simulações salvas. Repetir um nome substitui a simulação.`;}
+  $S("salvarComo").addEventListener("click",()=>{const f=$S("nomeForm");f.hidden=!f.hidden;if(!f.hidden){$S("lista").hidden=true;$S("salvas").setAttribute("aria-expanded","false");atualizarAviso();$S("nome").focus();}});
   $S("nomeCancel").addEventListener("click",()=>{$S("nomeForm").hidden=true;});
   $S("nomeForm").addEventListener("submit",async e=>{e.preventDefault();const nome=$S("nome").value.trim().replace(/\s+/g," ");if(!nome||nome.toLowerCase()==="ultima")return;
+    if(minhasSalvas().length>=SIM_MAX&&!minhasSalvas().some(x=>x.nome===nome)){atualizarAviso();$S("nomeAviso").classList.add("bad");return;}
+    $S("nomeAviso").classList.remove("bad");
     const l=await simSalvar(nome);if(l){SIM_ST.origem={tipo:"cenario",nome,de:simEmail().split("@")[0],em:l.atualizado_em};$S("nomeForm").hidden=true;$S("nome").value="";listarSalvas();estado();}});
 
   /* ---- resumo exportável: Excel (.xlsx, gerado aqui mesmo, sem biblioteca) e PDF (impressão do navegador → "Salvar como PDF"),
