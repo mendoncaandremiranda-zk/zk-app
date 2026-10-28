@@ -198,7 +198,7 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .chip span{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:13px;cursor:pointer;background:var(--surface);color:var(--ink)}
 .chip input:checked + span{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .kpis{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
-.kpi{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
+.kpi{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px;box-sizing:border-box;display:flex;flex-direction:column}
 .kpi .v{font-family:var(--f-display);font-stretch:85%;font-weight:800;font-size:28px;font-variant-numeric:tabular-nums}
 .kpi .l{font-size:13px;color:var(--muted)}
 .kpi .s{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:4px}
@@ -665,7 +665,14 @@ function rerender(){
   else if(VIEW==="premissas")viewPremissas(m);
   else if(VIEW==="chuvas")viewChuvas(m);
   else viewRelatorios(m);
+  igualarKpis();
 }
+/* harmonia visual (diretriz 06): todos os cartões de indicador da tela com a mesma altura — a do maior —
+   recalculado ao trocar de vista, ao redimensionar, quando as fontes terminam de carregar e a cada cálculo do Simulador */
+function igualarKpis(){requestAnimationFrame(()=>{const cs=[...document.querySelectorAll("#main .kpi")];if(!cs.length)return;
+  cs.forEach(c=>c.style.minHeight="");const mx=Math.max(...cs.map(c=>c.getBoundingClientRect().height));cs.forEach(c=>c.style.minHeight=Math.ceil(mx)+"px");});}
+addEventListener("resize",()=>{clearTimeout(igualarKpis.t);igualarKpis.t=setTimeout(igualarKpis,120);});
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(igualarKpis);
 document.getElementById("nav").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;VIEW=b.dataset.v;rerender();});
 
 async function start(){
@@ -1619,7 +1626,7 @@ function viewSimulador(main){
   function calc(){
     const s=scenario(), r=run(s), L=linhas(s,r);
     SIM_ST.ultimo={s,r,L};
-    $S("kpis").innerHTML=L.kpis.map(([l,v,sub,vc])=>`<div class="kpi"><div class="l">${l}</div><div class="v ${vc}">${v}</div><div class="s">${sub}</div></div>`).join("");
+    $S("kpis").innerHTML=L.kpis.map(([l,v,sub,vc])=>`<div class="kpi"><div class="l">${l}</div><div class="v ${vc}">${v}</div><div class="s">${sub}</div></div>`).join("");igualarKpis();
     $S("dre").innerHTML=tabela(["Item","R$","R$/cab vendida"],L.dre);
     $S("caixa").innerHTML=tabela(["Item","R$"],L.caixa);
     $S("econNote").textContent=L.econNote;
