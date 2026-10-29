@@ -310,6 +310,13 @@ details.pasta-rel summary::-webkit-details-marker{display:none}
 details.pasta-rel summary::before{content:"📁 "}
 details.pasta-rel[open] summary::before{content:"📂 "}
 .tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+.tbl.fixa{overflow:visible}
+.tbl.fixa thead th{position:sticky;top:var(--fixo,0px);z-index:2}
+.tbl.fixa thead th:first-child{border-top-left-radius:7px}.tbl.fixa thead th:last-child{border-top-right-radius:7px}
+.mapas-solo{display:flex;gap:10px;flex-wrap:wrap}
+.mapas-solo figure{margin:0;display:grid;gap:3px;justify-items:center;cursor:pointer}
+.mapas-solo img{width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--line)}
+.mapas-solo figcaption{font:600 10.5px var(--f-mono);letter-spacing:.03em;color:var(--muted);white-space:nowrap}
 table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{font-family:var(--f-mono);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--soft);white-space:nowrap}
@@ -843,7 +850,13 @@ function mostrarFicha(pn){
   }else{
     pn.classList.remove("aberta");document.body.classList.remove("ficha-aberta");revelarPainel(pn);
   }
+  requestAnimationFrame(()=>ajustarFixos(pn));
 }
+/* cabeçalho de tabela fixo na ficha: fica logo abaixo do topo fixo (abas da ficha no celular; barra do app no Mac) */
+function ajustarFixos(pn){pn=pn||document.getElementById("panel");if(!pn)return;
+  const off=pn.classList.contains("aberta")?(pn.querySelector(".ficha-top")?.offsetHeight||0):(document.querySelector(".top")?.getBoundingClientRect().height||0);
+  pn.style.setProperty("--fixo",Math.round(off)+"px");}
+window.addEventListener("resize",()=>ajustarFixos());
 function clearSel(){selN=null;selEstrId=null;
   document.querySelectorAll(".map .pasto").forEach(e=>e.classList.remove("sel"));
   document.querySelectorAll(".map .estr").forEach(e=>e.classList.remove("sel"));
@@ -920,16 +933,16 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
   }
   if(painelTab==="solo"){
     const fert=D.evPas.filter(e=>e.pasto_id===p.id&&e.status!=="cancelado"&&["calagem","adubacao","analise_solo"].includes(e.tipo));
-    corpo.push(h("div",{class:"badge"},"Calagem e adubações"));
-    corpo.push(fert.length?h("div",{},...fert.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":""),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado")))):h("div",{class:"note"},"Sem eventos de fertilidade."));
+    /* só o que existe: a seção aparece quando há calagem, adubação ou análise registrada */
+    if(fert.length)corpo.push(h("div",{class:"badge"},"Calagem e adubações"),h("div",{},...fert.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":""),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado")))));
     const sp=D.solo.filter(x=>x.pasto_id===p.id);
     if(sp.length){
       const ano=Math.max(...sp.map(x=>x.ano));
       const atual=sp.filter(x=>x.ano===ano);
       const cams=[...new Set(atual.map(x=>x.camada))].sort();
       const SOLO_ATTRS=[["ph","pH (CaCl₂)"],["ca","Ca"],["mg","Mg"],["k","K"],["ctc","CTC"],["v","V"],["m","m"],["p_meh","P (Mehlich)"],["s","S"],["mo","MO"]];
-      corpo.push(h("div",{class:"badge"},"Fertilidade do pasto — média interpolada (grade "+ano+")"));
-      corpo.push(h("div",{class:"tbl"},h("table",{},
+      corpo.push(h("div",{class:"badge"},"Fertilidade · (Grid "+ano+")"));
+      corpo.push(h("div",{class:"tbl fixa"},h("table",{},
         h("thead",{},h("tr",{},["Atributo","Unid.",...cams].map(x=>h("th",{},x)))),
         h("tbody",{},...SOLO_ATTRS.map(([k,lb])=>{
           const rows=cams.map(c=>atual.find(x=>x.camada===c&&x.atributo===k));
@@ -938,15 +951,17 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
           return h("tr",{},h("td",{},lb),h("td",{},un==="-"?"—":un),...rows.map(r=>h("td",{class:"n"},r&&r.valor!=null?nf(r.valor,2):"—")));
         }).filter(Boolean)))));
       corpo.push(h("div",{class:"note"},atual[0].metodo||""));
-    } else corpo.push(h("div",{class:"badge"},"Fertilidade do pasto"),h("div",{class:"note"},"Sem fertilidade interpolada cadastrada."));
+    }
     const mapsP=(SOLO_MAPAS&&SOLO_MAPAS[String(n)])||[];
     if(mapsP.length){
-      corpo.push(h("div",{class:"badge"},"Mapas de calor do pasto — grade Exata-Grid 2025 (0-20 cm)"));
-      corpo.push(h("div",{class:"fotogrid"},...mapsP.map(mp=>{
-        const img=h("img",{src:mp.src,alt:mp.titulo,title:mp.titulo});
-        img.addEventListener("click",()=>abrirViewer(mp.src,mp.titulo));
-        return img;})));
-      corpo.push(h("div",{class:"note"},"Toque num mapa para ampliar (V%, pH, CTC, K e P, com legenda)."));
+      const anoMapa=sp.length?Math.max(...sp.map(x=>x.ano)):2025;
+      corpo.push(h("div",{class:"badge"},"Mapas de fertilidade · Grid "+anoMapa+" · (0–20 cm)"));
+      corpo.push(h("div",{class:"mapas-solo"},...mapsP.map(mp=>{
+        const curto=(mp.titulo||"").split(/\s[—·]\s|\s/)[0];
+        const f=h("figure",{title:mp.titulo},h("img",{src:mp.src,alt:mp.titulo}),h("figcaption",{},curto));
+        f.addEventListener("click",()=>abrirViewer(mp.src,mp.titulo));
+        return f;})));
+      corpo.push(h("div",{class:"note"},"Toque num mapa para ampliar, com legenda."));
     }
   }
   if(painelTab==="desempenho"){
