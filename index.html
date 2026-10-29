@@ -172,6 +172,16 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .badge{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .ev{border-top:1px dashed var(--line);padding:8px 0;font-size:14px}
 .comp-list{display:grid;gap:0;margin:-2px 0 0}
+.alerta{border:1px solid var(--warn);border-left-width:4px;border-radius:8px;padding:9px 12px;display:grid;gap:3px;font-size:14px;background:var(--surface)}
+.alerta b{font:600 12px var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--warn)}
+.alerta.bad{border-color:var(--bad)} .alerta.bad b{color:var(--bad)}
+.alerta.ok{border-color:var(--ok)} .alerta.ok b{color:var(--ok)}
+.alerta .acoes{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.card>.alerta{margin:10px 0 12px}
+.regform .ou{font:600 11px var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:2px}
+.regform .ou::before,.regform .ou::after{content:"";flex:1;border-top:1px dashed var(--line)}
+.regform .btn.foto{min-height:44px}
+.ev .selo{margin-left:6px}
 .comp-list+.kv{margin-top:-10px;padding-top:10px;border-top:1px dashed var(--line)}
 .panel .badge+.kv{margin-top:-2px}
 .kv dt small{display:block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.02em;margin-top:1px}
@@ -504,7 +514,7 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],comp:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+const D={tentChuva:[],chuvaFoto:{ativo:false},pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],comp:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
 /* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
    Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
    O banco garante por RLS; aqui só se decide o que aparece na tela. */
@@ -530,7 +540,8 @@ async function carregar(){
     q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs,criado_em",["vigente_desde",{ascending:false}]),
     q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}]),
     /* leituras de chuva: tolerante — sem a tabela, o app segue funcionando com a lista vazia */
-    q("leituras_chuva","id,estrutura_id,data,mm,obs,autor_email,criado_em",["data",{ascending:false}]).catch(()=>[]),
+    q("leituras_chuva","id,estrutura_id,data,mm,obs,origem,autor_email,criado_em",["data",{ascending:false}])
+      .catch(()=>q("leituras_chuva","id,estrutura_id,data,mm,obs,autor_email,criado_em",["data",{ascending:false}])).catch(()=>[]),
     /* ponte modelo→banco (db/16): última posição publicada do modelo (sócio+; vazio para usuário padrão), mapa de fontes
        das premissas e últimas execuções — todos tolerantes: sem a tabela ou sem permissão, seguem vazios */
     sb.from("posicao_modelo").select("id,data_base,recalculado_em,arquivo_sha256,valores,origens,versao_catalogo,publicado_em").order("publicado_em",{ascending:false}).limit(1).then(({data})=>data&&data[0]||null).catch(()=>null),
@@ -540,8 +551,11 @@ async function carregar(){
     sb.from("simulacoes").select("id,usuario_email,nome,modo,entradas,resultado,posicao_id,data_base,atualizado_em").order("atualizado_em",{ascending:false}).then(({data})=>data||[]).catch(()=>[]),
     /* composição da pastagem por pasto (db/23): uma linha por cultivar/parte do pasto — tolerante */
     q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,etapa,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])
-      .catch(()=>q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])).catch(()=>[])]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],quando:new Date()});
+      .catch(()=>q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])).catch(()=>[]),
+    /* leitura do pluviômetro pela foto (db/26): tentativas — só o administrador vê (RLS) — e se a função está ativa */
+    sb.from("leituras_chuva_tentativas").select("id,estrutura_id,data,capturado_em,foto_path,distancia_m,precisao_m,resultado,mm,motivo,leitura_id,autor_email").order("criado_em",{ascending:false}).limit(30).then(({data})=>data||[]).catch(()=>[]),
+    chuvaFotoStatus()]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],tentChuva:r[20],chuvaFoto:r[21],quando:new Date()});
   salvarSnapshot();
 }
 /* ---------- posição do modelo (ponte modelo→banco) ----------
@@ -991,6 +1005,7 @@ function selEstrutura(id){selEstrId=id;selN=null;
     corpo.push(h("div",{class:"note"},reg.tipo==="estoque"?"Saldo por insumo, movimentações e autonomia entram na carga do estoque (próximo passo).":"Cadastro da frota, manutenções, consumo e operações entram no próximo passo."));
   if(reg&&reg.tipo==="pluviometro"){
     const ac=chuvaAcum(reg.id);
+    const pend=alertaChuva(reg.id);if(pend)corpo.push(pend);
     corpo.push(h("div",{class:"badge"},"Acumulados",h("span",{class:"selo vig"},"Leituras registradas")),
       h("dl",{class:"kv"},
         h("dt",{},"Últimos 7 dias"),h("dd",{},nf(ac.d7,1)+" mm"),
@@ -999,9 +1014,10 @@ function selEstrutura(id){selEstrId=id;selN=null;
         h("dt",{},"Ano hidrológico"),h("dd",{},nf(ac.ano,1)+" mm desde "+dmy(ac.inicioAno))));
     const hist=D.chuva.filter(c=>c.estrutura_id===reg.id).slice(0,5);
     corpo.push(h("div",{class:"badge"},"Últimas leituras"),
-      hist.length?h("div",{},...hist.map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data)+" · "),nf(c.mm,1)+" mm",
-        h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.obs?h("div",{class:"d"},c.obs):null))):h("div",{class:"note"},"Sem leituras registradas."),
+      hist.length?h("div",{},...hist.map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data).slice(0,5)+" · "),nf(c.mm,1)+" mm",
+        h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null))):h("div",{class:"note"},"Sem leituras registradas."),
       regChuva(reg.id),
+      D.admin?posicaoPluvio(reg.id):null,
       h("button",{class:"btn sm",type:"button",onclick:()=>{clearSel();VIEW="chuvas";rerender();window.scrollTo(0,0);}},"Ver relatório de chuvas"));
   }
   const kids=[...corpo,reg?fotoStrip("estrutura",reg.id,null):null].filter(Boolean);
@@ -1049,13 +1065,90 @@ function chuvaAcum(eid){
     mes:soma(c=>c.data.slice(0,7)===hj.slice(0,7)),ano:soma(c=>c.data>=ini&&c.data<=hj),inicioAno:ini,
     ultima:L[0]||null,diasMes:new Set(L.filter(c=>c.data.slice(0,7)===hj.slice(0,7)&&Number(c.mm)>0).map(c=>c.data)).size};
 }
+/* ---------- leitura do pluviômetro pela foto (função ler-pluviometro no servidor; db/26) ---------- */
+const FN_CHUVA=SUPA_URL+"/functions/v1/ler-pluviometro";
+const authFn=async()=>{const{data:{session}}=await sb.auth.getSession();return{apikey:SUPA_KEY,Authorization:"Bearer "+(session?.access_token||SUPA_KEY)};};
+async function chuvaFotoStatus(){try{const r=await fetch(FN_CHUVA,{headers:await authFn()});return r.ok?await r.json():{ativo:false};}catch(e){return{ativo:false};}}
+async function chamarLeitura(body){
+  const r=await fetch(FN_CHUVA,{method:"POST",headers:{"content-type":"application/json",...await authFn()},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));if(!j.resultado)j.resultado="erro";if(!j.motivo)j.motivo=j.mensagem||"falha na comunicação com o servidor";return j;}
+const pegarPosicao=()=>new Promise(ok=>{if(!navigator.geolocation)return ok(null);
+  navigator.geolocation.getCurrentPosition(p=>ok({lat:p.coords.latitude,lon:p.coords.longitude,prec:Math.round(p.coords.accuracy)}),()=>ok(null),{enableHighAccuracy:true,timeout:20000,maximumAge:60000});});
+async function reduzirFoto(file,max){
+  const url=URL.createObjectURL(file);
+  try{const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error("imagem inválida"));i.src=url;});
+    const k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*k);c.height=Math.round(img.naturalHeight*k);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    return await new Promise(ok=>c.toBlob(ok,"image/jpeg",0.88));}
+  finally{URL.revokeObjectURL(url);}}
+/* pluviômetros com dia sem leitura (últimos 7 dias, a partir da 1ª leitura de cada um) — todo ponto cadastrado é lido todo dia */
+function chuvaFaltas(eid){
+  return pluvios().filter(p=>!eid||p.id===eid).map(p=>{
+    const L=D.chuva.filter(c=>c.estrutura_id===p.id);
+    if(!L.length)return{p,dias:null};
+    const ini=L.map(c=>c.data).sort()[0],tem=new Set(L.map(c=>c.data));
+    const dias=[...Array(7)].map((_,i)=>isoDia(Date.now()-(6-i)*86400000)).filter(d=>d>=ini&&!tem.has(d));
+    return dias.length?{p,dias}:null;}).filter(Boolean);}
+const diasTxt=dias=>{const t=dias.map(d=>d===hojeIso()?"hoje":dmy(d).slice(0,5));return t.length>1?t.slice(0,-1).join(", ")+" e "+t[t.length-1]:t[0];};
+const faltaTxt=f=>f.dias?diasTxt(f.dias):"nenhuma leitura registrada";
+function alertaChuva(eid){const F=chuvaFaltas(eid);if(!F.length)return null;
+  return h("div",{class:"alerta"},h("b",{},"Leitura de chuva pendente"),
+    ...F.map(f=>h("div",{},eid?"":nomeCurto(f.p)+" · ",faltaTxt(f))));}
+let FLASH_CHUVA=null;
+const frase=t=>{t=String(t||"").trim().replace(/\.$/,"");return t?t[0].toUpperCase()+t.slice(1):t;};
+function posicaoPluvio(eid){
+  const msg=h("div",{class:"note"});
+  const b=h("button",{class:"btn sm",type:"button",onclick:async()=>{b.disabled=true;b.textContent="Localizando…";msg.textContent="";
+    const pos=await pegarPosicao();
+    if(!pos){msg.textContent="O celular não informou a localização.";b.disabled=false;b.textContent="Gravar posição pelo GPS";return;}
+    const{error}=await sb.rpc("estrutura_marcar_posicao",{p_estrutura:eid,p_lat:pos.lat,p_lon:pos.lon,p_precisao:pos.prec});
+    b.disabled=false;b.textContent="Gravar posição pelo GPS";
+    msg.textContent=error?"Falhou: "+error.message:"Posição gravada (precisão ± "+nf(pos.prec,0)+" m).";}},"Gravar posição pelo GPS");
+  return h("div",{class:"regform"},h("div",{class:"badge"},"Posição do pluviômetro"),
+    h("div",{class:"note"},"Referência da leitura pela foto. Grave junto do pluviômetro."),b,msg);}
 function regChuva(eidFixo){
   const sel=eidFixo?null:h("select",{},...pluvios().map(e=>h("option",{value:e.id},nomeCurto(e))));
   const data=h("input",{type:"date",value:hojeIso(),max:hojeIso()});
   const mm=h("input",{inputmode:"decimal",placeholder:"mm (0 = sem chuva)"});
   const obs=h("input",{type:"text",placeholder:"observação (opcional)"});
   const msg=h("div",{class:"note"});
-  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar leitura");
+  const fotoOn=!!D.chuvaFoto?.ativo;
+  const btn=h("button",{class:"btn sm"+(fotoOn?"":" pri"),type:"button"},"Registrar leitura");
+  /* leitura pela foto: câmera + GPS do celular; a função do servidor confere a distância, lê e grava */
+  const res=h("div",{});
+  const aviso=(tipo,titulo,linhas,acoes)=>res.replaceChildren(h("div",{class:"alerta"+(tipo?" "+tipo:"")},h("b",{},titulo),
+    ...[].concat(linhas).filter(Boolean).map(l=>h("div",{},l)),acoes?h("div",{class:"acoes"},...acoes):null));
+  if(FLASH_CHUVA&&Date.now()-FLASH_CHUVA.t<20000&&(!eidFixo||FLASH_CHUVA.eid===eidFixo))aviso("ok","Leitura gravada",FLASH_CHUVA.linhas);
+  const pedirManual=()=>{data.value=hojeIso();mm.value="";try{mm.focus({preventScroll:true});}catch(e){}};
+  const posFoto=async eid=>{await carregar();rerender();if(eidFixo)selEstrutura((MAP.estruturas||[]).find(s=>s.nome===D.estr.find(e=>e.id===eid)?.nome)?.id);};
+  const tratar=async(r,eid)=>{
+    if(r.resultado==="lida"){FLASH_CHUVA={t:Date.now(),eid,linhas:[nomeCurto(D.estr.find(e=>e.id===eid))+" · "+dmy(r.data)+" · "+nf(r.mm,1)+" mm · lido da foto"+(r.distancia_m!=null?" a "+nf(r.distancia_m,0)+" m do pluviômetro":""),"Esvazie o pluviômetro."]};
+      await posFoto(eid);return;}
+    if(r.resultado==="existe"){
+      const sub=h("button",{class:"btn pri sm",type:"button",onclick:async()=>{sub.disabled=true;sub.textContent="Gravando…";
+        try{await tratar(await chamarLeitura({acao:"confirmar",tentativa_id:r.tentativa_id}),eid);}catch(e){aviso("bad","Não gravou",[String(e?.message||e)]);}}},"Substituir por "+nf(r.mm,1)+" mm");
+      aviso("","Já existe leitura em "+dmy(r.data),["Registrada: "+nf(r.existente_mm,1)+" mm"+(r.existente_origem==="foto"?" (foto)":"")+" · a foto leu "+nf(r.mm,1)+" mm."],[sub]);return;}
+    const tit={"não lida":"A foto não permitiu a leitura","fora do ponto":"Foto longe do pluviômetro","sem localização":"Sem localização do celular"}[r.resultado]||"Leitura pela foto indisponível";
+    const det=r.resultado==="fora do ponto"?"A "+nf(r.distancia_m,0)+" m do pluviômetro — o limite é "+nf(r.limite_m||100,0)+" m."
+      :r.resultado==="sem localização"?"Permita a localização para o app no celular.":frase(r.motivo)+".";
+    aviso("bad",tit,[det,"Lance o valor manualmente abaixo."]);pedirManual();};
+  const cam=h("input",{type:"file",accept:"image/*",capture:"environment",hidden:true});
+  let posP=null;
+  const btnFoto=fotoOn?h("button",{class:"btn pri foto",type:"button",onclick:()=>{
+    if(!(eidFixo||sel?.value)){msg.textContent="Escolha o pluviômetro.";return;}
+    posP=pegarPosicao();cam.value="";cam.click();}},"Ler pela foto"):null;
+  cam.addEventListener("change",async()=>{const f=cam.files&&cam.files[0];if(!f)return;
+    const eid=eidFixo||sel.value,capt=new Date().toISOString();
+    btnFoto.disabled=true;btnFoto.textContent="Lendo a foto…";res.replaceChildren();
+    try{const[blob,pos]=await Promise.all([reduzirFoto(f,1600),posP||pegarPosicao()]);
+      const path="chuva/"+eid+"/"+hojeIso()+"_"+Date.now()+".jpg";
+      const{error}=await sb.storage.from("fotos").upload(path,blob,{contentType:"image/jpeg"});
+      if(error)throw error;
+      await tratar(await chamarLeitura({estrutura_id:eid,foto_path:path,lat:pos?pos.lat:null,lon:pos?pos.lon:null,precisao_m:pos?pos.prec:null,capturado_em:capt}),eid);
+    }catch(e){aviso("bad",pareceOffline(e)?"Sem conexão":"Leitura pela foto indisponível",
+      [pareceOffline(e)?"A leitura pela foto precisa de internet.":String(e?.message||e),"Lance o valor manualmente abaixo."]);pedirManual();}
+    finally{if(btnFoto.isConnected){btnFoto.disabled=false;btnFoto.textContent="Ler pela foto";}}});
   const gravar=async(substituir)=>{
     const eid=eidFixo||sel.value;
     const v=Number(String(mm.value).replace(",","."));
@@ -1064,7 +1157,7 @@ function regChuva(eidFixo){
     btn.disabled=true;btn.textContent="Gravando…";msg.replaceChildren();
     const linha={estrutura_id:eid,data:data.value,mm:Math.round(v*10)/10,obs:obs.value.trim()||null,autor_email:D.email};
     const{error}=substituir
-      ?await sb.from("leituras_chuva").update({mm:linha.mm,obs:linha.obs,autor_email:D.email}).eq("estrutura_id",eid).eq("data",data.value)
+      ?await sb.from("leituras_chuva").update({mm:linha.mm,obs:linha.obs,origem:"manual",tentativa_id:null,autor_email:D.email}).eq("estrutura_id",eid).eq("data",data.value)
       :await sb.from("leituras_chuva").insert(linha);
     if(error){btn.disabled=false;btn.textContent="Registrar leitura";
       if(/duplicate|unique|leituras_chuva_estrutura_id_data/i.test(error.message)){
@@ -1078,6 +1171,7 @@ function regChuva(eidFixo){
   btn.addEventListener("click",()=>gravar(false));
   return h("div",{class:"regform"},h("div",{class:"badge"},"Registrar leitura de chuva"),
     sel?h("label",{class:"f"},"Pluviômetro",sel):null,
+    ...(fotoOn?[btnFoto,cam,h("div",{class:"note",style:"margin-top:-2px"},"Foto da escala, de frente, a até "+nf(D.chuvaFoto.limite_m||100,0)+" m do pluviômetro."),res,h("div",{class:"ou"},"ou lance manualmente")]:[res]),
     h("div",{class:"grid2"},h("label",{class:"f"},"Data da leitura",data),h("label",{class:"f"},"Chuva (mm)",mm)),
     obs,btn,msg);
 }
@@ -1131,12 +1225,22 @@ function viewChuvas(main){
   const nomeMes=m=>["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][Number(m.slice(5))-1]+"/"+m.slice(0,4);
   const linhasMes=Object.keys(meses).sort().reverse().map(m=>h("tr",{},h("td",{},nomeMes(m)),
     ...ps.map(p=>{const o=meses[m][p.id];return h("td",{class:"n",style:"white-space:normal"},o?[nf(o.mm,1)+" mm",h("div",{style:"font-size:11px;color:var(--muted)"},o.dias+" dias · máx "+nf(o.max,1))]:"—");})));
-  const recentes=D.chuva.slice(0,5).map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data)+" · "),
-    nomeCurto(D.estr.find(e=>e.id===c.estrutura_id))+" · "+nf(c.mm,1)+" mm",h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.obs?h("div",{class:"d"},c.obs):null));
+  const recentes=D.chuva.slice(0,5).map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data).slice(0,5)+" · "),
+    nomeCurto(D.estr.find(e=>e.id===c.estrutura_id))+" · "+nf(c.mm,1)+" mm",h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null));
+  /* leituras pela foto — todas as tentativas, para o administrador ver o que houve (foto, distância, motivo) */
+  const hm=iso=>{const d=new Date(iso);return dmy(isoDia(d)).slice(0,5)+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
+  const tent=D.admin?D.tentChuva.slice(0,10).map(t=>{
+    const man=t.resultado!=="lida"?D.chuva.find(c=>c.estrutura_id===t.estrutura_id&&c.data===t.data&&c.origem!=="foto"):null;
+    const ver=t.foto_path?h("button",{class:"btn sm",type:"button",onclick:async()=>{const u=await fotoUrl(t.foto_path);if(u)abrirViewer(u,nomeCurto(D.estr.find(e=>e.id===t.estrutura_id))+" · "+hm(t.capturado_em));}},"Ver foto"):null;
+    return h("div",{class:"ev"},h("span",{class:"d"},hm(t.capturado_em)+" · "),nomeCurto(D.estr.find(e=>e.id===t.estrutura_id)),
+      h("span",{class:"selo "+(t.resultado==="lida"?"vig":"bad")},t.resultado),
+      h("div",{class:"d"},[t.resultado==="lida"?nf(t.mm,1)+" mm":frase(t.motivo),t.distancia_m!=null&&t.resultado!=="fora do ponto"?"a "+nf(t.distancia_m,0)+" m":null,
+        man?"lançado manualmente: "+nf(man.mm,1)+" mm":null,(t.autor_email||"").split("@")[0]].filter(Boolean).join(" · ")),ver?h("div",{style:"margin-top:4px"},ver):null);}):[];
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Chuvas",h("span",{class:"selo vig"},"Leituras registradas")),
     h("p",{class:"note"},"Pluviômetros "+ps.map(nomeCurto).join(" e ")+" · posição em "+(D.quando?D.quando.toLocaleDateString("pt-BR"):"—")+" · ano hidrológico desde "+dmy(inicioAnoHidro())+"."),
     ps.length?null:h("div",{class:"note"},"Nenhum pluviômetro cadastrado."),
+    alertaChuva(null),
     h("div",{class:"kpis"},
       kpi(nf(media("d7"),1)+" mm","Últimos 7 dias",ac.map(a=>nomeCurto(a.p)+" "+nf(a.d7,1)).join(" · ")),
       kpi(nf(media("mes"),1)+" mm","Mês corrente",ac.map(a=>nomeCurto(a.p)+" "+nf(a.mes,1)+" ("+a.diasMes+" dias)").join(" · ")),
@@ -1151,7 +1255,9 @@ function viewChuvas(main){
       h("tbody",{},...linhasMes))):h("div",{class:"note"},"Sem leituras ainda."),
     h("div",{style:"margin-top:14px"},regChuva(null)),
     h("div",{class:"badge",style:"margin-top:14px"},"Leituras recentes"),
-    recentes.length?h("div",{},...recentes):h("div",{class:"note"},"Sem leituras ainda.")));
+    recentes.length?h("div",{},...recentes):h("div",{class:"note"},"Sem leituras ainda."),
+    tent.length?h("div",{class:"badge",style:"margin-top:14px"},"Leituras pela foto — tentativas"):null,
+    tent.length?h("div",{},...tent):null));
 }
 
 /* ---------- vista: premissas ---------- */
@@ -1446,7 +1552,8 @@ function viewConsultas(main){
       +"Rebanho: "+cabTot+" cab ("+pos+")\n"
       +"Água: "+(pend?pend+" ponto(s) com pendência":"sem pendências")+"\n"
       +(ag?"Agenda: "+ag:"Agenda: nada programado em 30 dias")
-      +(pluvios().length?"\nChuva no mês: "+pluvios().map(e=>nomeCurto(e)+" "+nf(chuvaAcum(e.id).mes,1)+" mm").join(" · "):"");};
+      +(pluvios().length?"\nChuva no mês: "+pluvios().map(e=>nomeCurto(e)+" "+nf(chuvaAcum(e.id).mes,1)+" mm").join(" · "):"")
+      +(chuvaFaltas(null).length?"\nLeitura de chuva pendente: "+chuvaFaltas(null).map(f=>nomeCurto(f.p)+" ("+faltaTxt(f)+")").join(" · "):"");};
   const pre=h("pre",{class:"md"},resumoTxt());
   const btnCop=h("button",{class:"btn sm",type:"button",onclick:async()=>{try{await navigator.clipboard.writeText(resumoTxt());btnCop.textContent="Copiado ✓";}catch(e){btnCop.textContent="Selecione e copie do quadro";}}},"Copiar");
   const btnComp=(navigator.share?h("button",{class:"btn sm",type:"button",onclick:()=>navigator.share({text:resumoTxt()}).catch(()=>{})},"Compartilhar"):null);
