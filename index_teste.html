@@ -171,6 +171,16 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .kv dt{color:var(--muted)} .kv dd{margin:0;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .badge{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .ev{border-top:1px dashed var(--line);padding:8px 0;font-size:14px}
+.comp-list{display:grid;gap:0;margin:-2px 0 0}
+.comp-list+.kv{margin-top:-10px;padding-top:10px;border-top:1px dashed var(--line)}
+.kv dt small{display:block;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.02em;margin-top:1px}
+.kv dd>.nw{white-space:nowrap}
+.comp-it{padding:8px 0;border-bottom:1px dashed var(--line)}
+.comp-it:last-child{border-bottom:0}
+.comp-l1{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:14.5px}
+.comp-a{font-family:var(--f-mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.comp-l2{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);margin-top:2px}
+.badge .selo{margin-left:8px}
 .ev .d{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
 .selo{display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;flex-shrink:0;vertical-align:middle;box-sizing:border-box;min-height:20px;font-family:var(--f-mono);font-size:10px;font-weight:600;line-height:1;letter-spacing:.05em;text-transform:uppercase;padding:3px 8px 3px 9px;border-radius:999px;border:1px solid currentColor;margin-left:6px}
 .selo.vig{color:var(--ok)} .selo.hist{color:var(--muted)} .selo.prog{color:var(--warn)} .selo.bad{color:var(--bad)}
@@ -394,6 +404,12 @@ const CATALOGO_PREM=[
 ];
 const PREM_LABELS=Object.fromEntries(CATALOGO_PREM.flatMap(([g,itens])=>itens.map(([k,l])=>[k,l])));
 const premLabel=p=>PREM_LABELS[p.chave]||p.chave;
+/* composição da pastagem do pasto na safra (db/23); sem ela, cai na cultivar única da tabela pastagem */
+const compDe=(pid,safra="2026/27")=>{const c=D.comp.filter(x=>x.pasto_id===pid&&x.safra===safra).sort((a,b)=>a.ordem-b.ordem);
+  if(c.length)return c;const pg=D.pastagem.find(x=>x.pasto_id===pid&&x.safra===safra);const ps=D.pastos.find(x=>x.id===pid);return pg&&pg.cultivar?[{cultivar:pg.cultivar,pct_area:100,area_ha:ps?.area_oficial_ha??null,ano_formacao:pg.ano_formacao}]:[];};
+const cultivaresDe=pid=>[...new Set(compDe(pid).map(x=>x.cultivar))];
+const MESES_LONGOS=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+const mesCurto=m=>{const r=/^(\d{2})\/(\d{4})$/.exec(m||"");if(!r)return m||"";return ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+r[1]-1]+"/"+r[2].slice(2);};
 const premEscopo=e=>e==="geral"?"Geral":e.startsWith("cultivar:")?e.slice(9):e.startsWith("pasto:")?"Pasto "+e.slice(6):e;
 const premValor=p=>/^\d{4}-\d{2}-\d{2}$/.test(p.valor)?dmy(p.valor):p.valor+(p.unidade&&p.unidade!=="data"?" "+p.unidade:"");
 const nf=(v,d=2)=>Number(v).toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -488,7 +504,7 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+const D={pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],comp:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
 /* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
    Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
    O banco garante por RLS; aqui só se decide o que aparece na tela. */
@@ -501,7 +517,7 @@ async function carregar(){
   const r=await Promise.all([
     q("pastos","id,numero,nome,area_oficial_ha",["numero"]),
     q("movimentacoes_pastos","id,lote_id,pasto_id,cabecas,entrada,saida,obs,altura_entrada_cm,altura_saida_cm",["entrada",{ascending:false}]),
-    q("pastagem","pasto_id,safra,cultivar,ano_formacao,obs"),
+    q("pastagem","pasto_id,safra,cultivar,ano_formacao,obs,situacao").catch(()=>q("pastagem","pasto_id,safra,cultivar,ano_formacao,obs")),
     q("eventos_rebanho","id,lote_id,data,tipo,produto,dose,cabecas,responsavel,obs,status",["data",{ascending:false}]),
     q("eventos_pastagem","id,pasto_id,data,tipo,produto,dose,obs,status",["data",{ascending:false}]),
     q("estruturas","id,nome,tipo,obs"),
@@ -521,8 +537,10 @@ async function carregar(){
     q("premissas_fonte","chave,fonte,origem,consumidores,obs").catch(()=>[]),
     sb.from("ponte_execucoes").select("iniciado_em,ambiente,modo,data_base,resultado,resumo").order("iniciado_em",{ascending:false}).limit(5).then(({data})=>data||[]).catch(()=>[]),
     /* simulações salvas (db/20): a "última" de cada usuário e os cenários com nome — tolerante (sem a tabela, lista vazia) */
-    sb.from("simulacoes").select("id,usuario_email,nome,modo,entradas,resultado,posicao_id,data_base,atualizado_em").order("atualizado_em",{ascending:false}).then(({data})=>data||[]).catch(()=>[])]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],quando:new Date()});
+    sb.from("simulacoes").select("id,usuario_email,nome,modo,entradas,resultado,posicao_id,data_base,atualizado_em").order("atualizado_em",{ascending:false}).then(({data})=>data||[]).catch(()=>[]),
+    /* composição da pastagem por pasto (db/23): uma linha por cultivar/parte do pasto — tolerante */
+    q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"]).catch(()=>[])]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],quando:new Date()});
   salvarSnapshot();
 }
 /* ---------- posição do modelo (ponte modelo→banco) ----------
@@ -829,14 +847,27 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
   const o=ocup(n);
   if(painelTab==="pasto"){
     const pg=D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27");
-    const sem=D.evPas.filter(e=>e.pasto_id===p.id&&e.tipo==="semeadura");
+    const sem=D.evPas.filter(e=>e.pasto_id===p.id&&e.tipo==="semeadura"&&e.status!=="cancelado").sort((a,b)=>a.data<b.data?-1:1);
+    const comp=compDe(p.id);
+    const situ=pg?.situacao;
+    const seloSitu=situ?h("span",{class:"selo "+(situ==="Formado"?"vig":situ==="Em formação"?"prog":"hist")},situ):null;
+    /* altura preconizada por cultivar presente no pasto (premissa do pasto vale para todas) */
+    const alturas=cultivaresDe(p.id).map(cv=>{const esc=["pasto:"+n,"cultivar:"+cv];const e=premNum("altura_entrada_meta_cm",esc,null),s=premNum("altura_saida_meta_cm",esc,null);
+      return e!=null||s!=null?{cv,txt:(e!=null?nf(e,0):"—")+" → "+(s!=null?nf(s,0):"—")+" cm"}:null;}).filter(Boolean);
+    /* meta usada na edição das alturas do lote: cultivar predominante do pasto */
     const escopos=["pasto:"+n,"cultivar:"+(pg?.cultivar||"")];
     const metaE=premNum("altura_entrada_meta_cm",escopos,null),metaS=premNum("altura_saida_meta_cm",escopos,null);
-    corpo.push(h("div",{class:"badge"},"Pastagem · safra 2026/27"),
-      pg?h("dl",{class:"kv"},h("dt",{},"Cultivar"),h("dd",{},pg.cultivar||"—"),h("dt",{},"Formação"),h("dd",{},pg.ano_formacao||"—"),
-        h("dt",{},"Replantio"),h("dd",{},sem.length?sem.map(e=>`${e.produto} (${/dia não informado/.test(e.obs||"")?"out/26":dmy(e.data)})`).join("; "):"não houve"),
-        ...(metaE!=null||metaS!=null?[h("dt",{},"Altura preconizada"),h("dd",{},[metaE!=null?"entrada "+nf(metaE,0)+" cm":null,metaS!=null?"saída "+nf(metaS,0)+" cm":null].filter(Boolean).join(" · "))]:[]),
-        ...(pg.obs?[h("dt",{},"Obs."),h("dd",{},pg.obs)]:[])):h("div",{class:"note"},"Sem cadastro de pastagem."));
+    corpo.push(h("div",{class:"badge"},"Pastagem · safra 2026/27",seloSitu));
+    if(comp.length){
+      corpo.push(h("div",{class:"comp-list"},...comp.map(c=>h("div",{class:"comp-it"},
+        h("div",{class:"comp-l1"},h("b",{},c.cultivar),h("span",{class:"comp-a"},(c.pct_area!=null?nf(c.pct_area,0)+"%":"")+(c.area_ha!=null?" · "+nf(c.area_ha,2)+" ha":""))),
+        h("div",{class:"comp-l2"},[c.ano_formacao?"formação "+c.ano_formacao:null,c.metodo?c.metodo.toLowerCase():null,c.data_semeadura?dmy(c.data_semeadura):(c.mes_semeadura?mesCurto(c.mes_semeadura):null),c.taxa_kg_ha!=null?nf(c.taxa_kg_ha,0)+" kg/ha":null].filter(Boolean).join(" · ")),
+        c.obs?h("div",{class:"comp-l2"},c.obs):null))));
+      corpo.push(h("dl",{class:"kv"},
+        h("dt",{},"Replantio 2026"),h("dd",{},...(sem.length?sem.map(e=>h("div",{class:"nw"},[e.produto,/dia não informado/.test(e.obs||"")?MESES_LONGOS[+String(e.data).slice(5,7)-1]:String(e.data).slice(8,10)+"/"+String(e.data).slice(5,7),/[Dd]rone/.test(e.obs||"")?"drone":/[Aa] lanço/.test(e.obs||"")?"a lanço":null].filter(Boolean).join(" · "))):["não houve"])),
+        ...(alturas.length?[h("dt",{},"Altura preconizada",h("small",{},"entrada → saída")),h("dd",{},...alturas.map(a=>h("div",{class:"nw"},(alturas.length>1?a.cv+" · ":"")+a.txt)))]:[]),
+        ...(pg?.obs?[h("dt",{},"Obs."),h("dd",{},pg.obs)]:[])));
+    }else corpo.push(h("div",{class:"note"},"Sem cadastro de pastagem."));
     corpo.push(h("div",{class:"badge"},"Lote no pasto",h("span",{class:"selo vig"},"Vigente")));
     if(o.length)o.forEach(m=>{
       const edit=(campo,label,meta)=>{const inp=h("input",{inputmode:"decimal",placeholder:"cm",value:m[campo]??""});
@@ -874,7 +905,7 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
     });
   }
   if(painelTab==="solo"){
-    const fert=D.evPas.filter(e=>e.pasto_id===p.id&&["calagem","adubacao","analise_solo"].includes(e.tipo));
+    const fert=D.evPas.filter(e=>e.pasto_id===p.id&&e.status!=="cancelado"&&["calagem","adubacao","analise_solo"].includes(e.tipo));
     corpo.push(h("div",{class:"badge"},"Calagem e adubações"));
     corpo.push(fert.length?h("div",{},...fert.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":""),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado")))):h("div",{class:"note"},"Sem eventos de fertilidade."));
     const sp=D.solo.filter(x=>x.pasto_id===p.id);
@@ -1194,7 +1225,7 @@ function viewPremissas(main){
   const unidadeLivre=h("input",{placeholder:"unidade (ex.: kg/cab/dia)"});
   const livreRow=h("div",{class:"grid2",hidden:true},chaveLivre,unidadeLivre);
   const selEscopo=h("select",{},h("option",{value:"geral"},"Geral"),h("option",{value:"cultivar"},"Por cultivar"),h("option",{value:"pasto"},"Por pasto"));
-  const cultivares=[...new Set([...D.pastagem.map(x=>x.cultivar).filter(Boolean),"Marandu","Mombaça","Zuri","Tamani"])].sort();
+  const cultivares=[...new Set([...D.pastagem.map(x=>x.cultivar).filter(Boolean),...D.comp.map(x=>x.cultivar).filter(Boolean),"Marandu","Mombaça","Zuri","Tamani"])].sort();
   const selCultivar=h("select",{},...cultivares.map(c=>h("option",{value:c},c)));
   const selPasto=h("select",{},...D.pastos.map(p=>h("option",{value:String(p.numero)},p.nome)));
   const valorN=h("input",{placeholder:"valor"});
@@ -1322,7 +1353,7 @@ function viewConsultas(main){
     const oc=vig.find(m=>m.pasto_id===p.id);
     const cv=cvDe(p);
     const meta=premNum("dias_descanso_meta",["pasto:"+p.numero,"cultivar:"+(cv||""),"geral"],null);
-    const pcell=h("td",{},p.nome,cv?h("div",{style:"font-size:11px;color:var(--muted)"},cv):null);
+    const cvs=cultivaresDe(p.id).join(" + ");const pcell=h("td",{},p.nome,cvs?h("div",{style:"font-size:11px;color:var(--muted)"},cvs):null);
     const mtxt=meta!=null?nf(meta,0):"—";
     if(oc)return h("tr",{},pcell,h("td",{class:"n"},"— / "+mtxt),h("td",{},"ocupado · "+lote(oc.lote_id)));
     const saidas=D.mov.filter(m=>m.pasto_id===p.id&&m.saida).map(m=>m.saida).sort();
