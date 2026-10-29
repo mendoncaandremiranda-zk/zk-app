@@ -1071,7 +1071,7 @@ const authFn=async()=>{const{data:{session}}=await sb.auth.getSession();return{a
 async function chuvaFotoStatus(){try{const r=await fetch(FN_CHUVA,{headers:await authFn()});return r.ok?await r.json():{ativo:false};}catch(e){return{ativo:false};}}
 async function chamarLeitura(body){
   const r=await fetch(FN_CHUVA,{method:"POST",headers:{"content-type":"application/json",...await authFn()},body:JSON.stringify(body)});
-  const j=await r.json().catch(()=>({}));if(!j.resultado)j.resultado="erro";if(!j.motivo)j.motivo=j.mensagem||"falha na comunicação com o servidor";return j;}
+  const j=await r.json().catch(()=>({}));if(!j.resultado)j.resultado="erro";if(!j.motivo&&j.resultado!=="lida"&&j.resultado!=="existe")j.motivo=j.mensagem||"falha na comunicação com o servidor";return j;}
 const pegarPosicao=()=>new Promise(ok=>{if(!navigator.geolocation)return ok(null);
   navigator.geolocation.getCurrentPosition(p=>ok({lat:p.coords.latitude,lon:p.coords.longitude,prec:Math.round(p.coords.accuracy)}),()=>ok(null),{enableHighAccuracy:true,timeout:20000,maximumAge:60000});});
 async function reduzirFoto(file,max){
