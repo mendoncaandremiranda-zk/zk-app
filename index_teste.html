@@ -409,7 +409,6 @@ const premLabel=p=>PREM_LABELS[p.chave]||p.chave;
 const compDe=(pid,safra="2026/27")=>{const c=D.comp.filter(x=>x.pasto_id===pid&&x.safra===safra).sort((a,b)=>a.ordem-b.ordem);
   if(c.length)return c;const pg=D.pastagem.find(x=>x.pasto_id===pid&&x.safra===safra);const ps=D.pastos.find(x=>x.id===pid);return pg&&pg.cultivar?[{cultivar:pg.cultivar,pct_area:100,area_ha:ps?.area_oficial_ha??null,ano_formacao:pg.ano_formacao}]:[];};
 const cultivaresDe=pid=>[...new Set(compDe(pid).map(x=>x.cultivar))];
-const MESES_LONGOS=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 const mesCurto=m=>{const r=/^(\d{2})\/(\d{4})$/.exec(m||"");if(!r)return m||"";return ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][+r[1]-1]+"/"+r[2].slice(2);};
 const premEscopo=e=>e==="geral"?"Geral":e.startsWith("cultivar:")?e.slice(9):e.startsWith("pasto:")?"Pasto "+e.slice(6):e;
 const premValor=p=>/^\d{4}-\d{2}-\d{2}$/.test(p.valor)?dmy(p.valor):p.valor+(p.unidade&&p.unidade!=="data"?" "+p.unidade:"");
@@ -540,7 +539,8 @@ async function carregar(){
     /* simulações salvas (db/20): a "última" de cada usuário e os cenários com nome — tolerante (sem a tabela, lista vazia) */
     sb.from("simulacoes").select("id,usuario_email,nome,modo,entradas,resultado,posicao_id,data_base,atualizado_em").order("atualizado_em",{ascending:false}).then(({data})=>data||[]).catch(()=>[]),
     /* composição da pastagem por pasto (db/23): uma linha por cultivar/parte do pasto — tolerante */
-    q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"]).catch(()=>[])]);
+    q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,etapa,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])
+      .catch(()=>q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])).catch(()=>[])]);
   Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],quando:new Date()});
   salvarSnapshot();
 }
@@ -848,7 +848,6 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
   const o=ocup(n);
   if(painelTab==="pasto"){
     const pg=D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27");
-    const sem=D.evPas.filter(e=>e.pasto_id===p.id&&e.tipo==="semeadura"&&e.status!=="cancelado").sort((a,b)=>a.data<b.data?-1:1);
     const comp=compDe(p.id);
     const situ=pg?.situacao;
     const seloSitu=situ?h("span",{class:"selo "+(situ==="Formado"?"vig":situ==="Em formação"?"prog":"hist")},situ):null;
@@ -862,10 +861,10 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
     if(comp.length){
       corpo.push(h("div",{class:"comp-list"},...comp.map(c=>h("div",{class:"comp-it"},
         h("div",{class:"comp-l1"},h("b",{},c.cultivar),h("span",{class:"comp-a"},(c.pct_area!=null?nf(c.pct_area,0)+"%":"")+(c.area_ha!=null?" · "+nf(c.area_ha,2)+" ha":""))),
-        h("div",{class:"comp-l2"},[c.ano_formacao?"formação "+c.ano_formacao:null,c.metodo?c.metodo.toLowerCase():null,c.data_semeadura?dmy(c.data_semeadura):(c.mes_semeadura?mesCurto(c.mes_semeadura):null),c.taxa_kg_ha!=null?nf(c.taxa_kg_ha,0)+" kg/ha":null].filter(Boolean).join(" · ")),
+        h("div",{class:"comp-l2"},[c.ano_formacao?(c.etapa||"formação")+" "+c.ano_formacao:null,c.metodo?c.metodo.toLowerCase():null,c.data_semeadura?dmy(c.data_semeadura):(c.mes_semeadura?mesCurto(c.mes_semeadura):null),c.taxa_kg_ha!=null?nf(c.taxa_kg_ha,0)+" kg/ha":null].filter(Boolean).join(" · ")),
         c.obs?h("div",{class:"comp-l2"},c.obs):null))));
-      corpo.push(h("dl",{class:"kv"},
-        h("dt",{},"Replantio 2026"),h("dd",{},...(sem.length?sem.map(e=>h("div",{class:"nw"},[e.produto,/dia não informado/.test(e.obs||"")?MESES_LONGOS[+String(e.data).slice(5,7)-1]:String(e.data).slice(8,10)+"/"+String(e.data).slice(5,7),/[Dd]rone/.test(e.obs||"")?"drone":/[Aa] lanço/.test(e.obs||"")?"a lanço":null].filter(Boolean).join(" · "))):["não houve"])),
+      /* só o que é: altura preconizada e observação, quando houver (etapa de cada parte — formação, replantio, plantio — vai na composição) */
+      if(alturas.length||pg?.obs)corpo.push(h("dl",{class:"kv"},
         ...(alturas.length?[h("dt",{},"Altura preconizada",h("small",{},"entrada → saída")),h("dd",{},...alturas.map(a=>h("div",{class:"nw"},(alturas.length>1?a.cv+" · ":"")+a.txt)))]:[]),
         ...(pg?.obs?[h("dt",{},"Obs."),h("dd",{},pg.obs)]:[])));
     }else corpo.push(h("div",{class:"note"},"Sem cadastro de pastagem."));
