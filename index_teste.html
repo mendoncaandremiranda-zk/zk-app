@@ -202,6 +202,10 @@ td.su-est{color:var(--muted)}
 .regform .su-chk input{width:auto;min-height:0;margin:2px 0 0}
 .su-erro{color:var(--bad);font-size:13px}
 .btn.bad{border-color:var(--bad);color:var(--bad)}
+.su-conf{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;padding:8px 10px;border:1px solid var(--bad);border-radius:8px;font-size:13px}
+.su-conf>span:first-child{flex:1 1 180px}
+.su-conf-b{display:flex;gap:6px;margin-left:auto}
+.su-hist[hidden]{display:none}
 .regform .btn.foto{min-height:44px}
 .ev .selo{margin-left:6px}
 .comp-list+.kv{margin-top:-10px;padding-top:10px;border-top:1px dashed var(--line)}
@@ -1241,27 +1245,33 @@ function suAlertas(){
 const suAlvoTxt=s=>s.reprodutor_id?(suRep(s.reprodutor_id)?.identificacao||"—"):s.bloco_id?suBlocoNome(s.bloco_id)+(s.categoria?" · "+cap(s.categoria):"")+(s.cabecas?" · "+s.cabecas+" cab":""):"Todo o plantel";
 
 /* ---- cancelar (administrador): o lançamento e o que nasceu dele ---- */
+/* anular (administrador): ação própria, com confirmação explícita na linha — nunca confundida com "fechar formulário" */
+const SU_ROT_ANULAR={suinos_movimentos:"este movimento",suinos_pesagens:"esta pesagem",suinos_alimentacao:"este fornecimento",suinos_sanidade:"este manejo"};
 function suBtnCancelar(tabela,row){
   if(!D.admin||row.status==="cancelado")return null;
-  const b=h("button",{class:"btn sm su-x",type:"button",title:"Cancelar este lançamento (fica no histórico)"},"Cancelar");
-  b.addEventListener("click",async()=>{
-    if(b.dataset.conf!=="1"){b.dataset.conf="1";b.textContent="Confirmar";b.classList.add("bad");setTimeout(()=>{if(b.isConnected){b.dataset.conf="";b.textContent="Cancelar";b.classList.remove("bad");}},4000);return;}
-    await suGravar(b,async()=>{
+  const rot=tabela==="suinos_reproducao"?(row.tipo==="cobertura"||row.tipo==="diagnóstico"||row.tipo==="parto"||row.tipo==="desmame"||row.tipo==="aborto"?"este "+row.tipo:"este registro"):SU_ROT_ANULAR[tabela]||"este lançamento";
+  const b=h("button",{class:"btn sm su-x",type:"button",title:"Anular "+rot+" (fica no histórico como anulado)"},"Anular");
+  b.addEventListener("click",()=>{const ev=b.closest(".su-ev");if(!ev||ev.querySelector(".su-conf"))return;
+    const sim=h("button",{class:"btn sm bad",type:"button"},"Anular"),nao=h("button",{class:"btn sm",type:"button"},"Manter");
+    const box=h("div",{class:"su-conf"},h("span",{},"Anular "+rot+"? Fica no histórico como anulado."),h("span",{class:"su-conf-b"},nao,sim));
+    nao.addEventListener("click",()=>{box.remove();b.hidden=false;});
+    b.hidden=true;ev.append(box);
+    sim.addEventListener("click",()=>suGravar(sim,async()=>{
       await suUpd(tabela,{status:"cancelado"},"id",row.id);
       if(row.par_id){await suUpd("suinos_movimentos",{status:"cancelado"},"par_id",row.par_id);
         await suUpd("suinos_pesagens",{status:"cancelado"},"par_id",row.par_id);
         if(tabela!=="suinos_reproducao")await suUpd("suinos_reproducao",{status:"cancelado"},"par_id",row.par_id);
         if(tabela!=="suinos_sanidade")await suUpd("suinos_sanidade",{status:"cancelado"},"par_id",row.par_id);}
-      /* reprodutor que tinha saído do plantel volta a ativo; o que tinha sido criado no evento fica cancelado */
+      /* reprodutor que tinha saído do plantel volta a ativo; o que tinha sido criado no evento fica anulado */
       const movs=row.par_id?su().mov.filter(m=>m.par_id===row.par_id):tabela==="suinos_movimentos"?[row]:[];
       for(const m of movs.filter(m=>m.reprodutor_id)){const r=suRep(m.reprodutor_id);if(!r)continue;
         if(m.cabecas<0&&r.situacao!=="ativo")await suUpd("suinos_reprodutores",{situacao:"ativo",saida:null},"id",r.id);
         if(m.cabecas>0&&r.entrada===m.data&&m.tipo==="reclassificação")await suUpd("suinos_reprodutores",{situacao:"cancelado"},"id",r.id);}
-    });});
+    }));});
   return b;
 }
 const suAcoes=(...b)=>{b=b.filter(Boolean);return b.length?h("span",{class:"su-acoes"},...b):null;};
-const suSeloSt=s=>s==="cancelado"?h("span",{class:"selo hist"},"Cancelado"):s==="programado"?h("span",{class:"selo prog"},"Programado"):null;
+const suSeloSt=s=>s==="cancelado"?h("span",{class:"selo hist"},"Anulado"):s==="programado"?h("span",{class:"selo prog"},"Programado"):null;
 
 /* ---- ficha ---- */
 function suFicha(st,reg,pn){
@@ -1448,14 +1458,18 @@ function suLinhaRepro(e){
 }
 function suBtnEditarRep(r){
   const b=h("button",{class:"btn sm su-ed",type:"button"},"Editar");
-  b.addEventListener("click",()=>{const card=b.closest(".su-card");if(card.querySelector(".su-edf"))return;
+  b.addEventListener("click",()=>{const card=b.closest(".su-card");const aberto=card.querySelector(".su-edf");const hist=card.querySelector(".su-hist");
+    if(aberto)return;
     const id=h("input",{type:"text",value:r.identificacao,placeholder:"identificação"}),ra=h("input",{type:"text",value:r.raca||"",placeholder:"raça / cruzamento"});
     const na=h("input",{type:"date",value:r.nascimento||""}),ob=h("input",{type:"text",value:r.obs||"",placeholder:"observação"});
-    const ok=h("button",{class:"btn pri sm",type:"button"},"Gravar");
+    const ok=h("button",{class:"btn pri sm",type:"button"},"Gravar"),fe=h("button",{class:"btn sm",type:"button"},"Fechar sem gravar");
+    const f=h("div",{class:"regform su-edf"},h("div",{class:"badge"},"Editar "+r.identificacao),h("div",{class:"grid2"},id,ra),h("div",{class:"grid2"},na,ob),h("div",{class:"grid2"},fe,ok));
+    fe.addEventListener("click",()=>{f.remove();if(hist)hist.hidden=false;b.hidden=false;});
     ok.addEventListener("click",()=>{if(!id.value.trim())return suErro(ok,"Informe a identificação.");
       if(su().rep.some(x=>x.id!==r.id&&x.identificacao.toLowerCase()===id.value.trim().toLowerCase()))return suErro(ok,"Já existe um reprodutor com essa identificação.");
       suGravar(ok,()=>suUpd("suinos_reprodutores",{identificacao:id.value.trim(),raca:ra.value.trim()||null,nascimento:na.value||null,obs:ob.value.trim()||null},"id",r.id));});
-    card.append(h("div",{class:"regform su-edf"},h("div",{class:"grid2"},id,ra),h("div",{class:"grid2"},na,ob),ok));});
+    /* o formulário entra logo abaixo do nome e o histórico (com os botões de anular) some enquanto se edita */
+    card.querySelector(".su-l1").after(f);if(hist)hist.hidden=true;b.hidden=true;});
   return b;
 }
 function suFormRepro(){
