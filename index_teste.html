@@ -1422,9 +1422,9 @@ function suAbaReproducao(){
   out.push(h("div",{class:"badge"},"Matrizes",h("span",{class:"selo vig"},mats.length+" ativas")));
   mats.forEach(m=>{const e=suEstadoMatriz(m.id);const ev=su().repro.filter(x=>x.matriz_id===m.id).sort(suDesc);
     const partos=ev.filter(x=>suOk(x)&&x.tipo==="parto"),desm=ev.filter(x=>suOk(x)&&x.tipo==="desmame");
-    const nv=partos.map(p=>(p.vivos_f||0)+(p.vivos_m||0));
+    const nv=partos.filter(p=>p.vivos_f!=null||p.vivos_m!=null).map(p=>(p.vivos_f||0)+(p.vivos_m||0));
     const selo=e.fase==="gestante"?h("span",{class:"selo "+(e.falta<0?"bad":"vig")},"Gestante"):e.fase==="lactante"?h("span",{class:"selo "+(e.falta<0?"bad":"vig")},"Lactante"):e.fase==="vazia"?h("span",{class:"selo prog"},"Vazia"):null;
-    const ind=[partos.length?partos.length+(partos.length>1?" partos":" parto")+" · "+nf(nv.reduce((s,v)=>s+v,0)/nv.length,1)+" nascidos vivos/parto":null,
+    const ind=[partos.length?partos.length+(partos.length>1?" partos":" parto")+(nv.length?" · "+nf(nv.reduce((s,v)=>s+v,0)/nv.length,1)+" nascidos vivos/parto":""):null,
       desm.length&&desm.some(x=>x.desmamados!=null)?nf(desm.reduce((s,x)=>s+(x.desmamados||0),0)/desm.filter(x=>x.desmamados!=null).length,1)+" desmamados/leitegada":null].filter(Boolean).join(" · ");
     out.push(h("div",{class:"su-card"},
       h("div",{class:"su-l1"},h("b",{},m.identificacao),h("span",{class:"d"},suBlocoNome(suBlocoDoRep(m.id))+(m.raca?" · "+m.raca:"")),selo,suAcoes(D.admin?suBtnEditarRep(m):null)),
@@ -1441,7 +1441,7 @@ function suAbaReproducao(){
 function suLinhaRepro(e){
   const det=e.tipo==="cobertura"?(e.cachaco_id?suRep(e.cachaco_id)?.identificacao:null)||e.metodo:
     e.tipo==="diagnóstico"?e.resultado:
-    e.tipo==="parto"?[(e.vivos_f||0)+(e.vivos_m||0)+" vivos ("+(e.vivos_f||0)+" F · "+(e.vivos_m||0)+" M)",e.natimortos?e.natimortos+" natimortos":null,e.mumificados?e.mumificados+" mumificados":null].filter(Boolean).join(" · "):
+    e.tipo==="parto"?[e.vivos_f!=null||e.vivos_m!=null?(e.vivos_f||0)+(e.vivos_m||0)+" vivos ("+(e.vivos_f||0)+" F · "+(e.vivos_m||0)+" M)":null,e.natimortos?e.natimortos+" natimortos":null,e.mumificados?e.mumificados+" mumificados":null].filter(Boolean).join(" · ")||null:
     e.tipo==="desmame"?[e.desmamados!=null?e.desmamados+" desmamados":null,e.peso_medio_kg?nf(e.peso_medio_kg,1)+" kg/cab":null].filter(Boolean).join(" · "):null;
   return h("div",{class:"ev su-ev"+(e.status==="cancelado"?" su-canc":"")},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(e.data).slice(0,5)+" · "),h("b",{},cap(e.tipo)),suSeloSt(e.status),suAcoes(suBtnCancelar("suinos_reproducao",e))),
     det?h("div",{},det):null,e.obs?h("div",{class:"d"},e.obs):null);
