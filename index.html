@@ -180,6 +180,28 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .card>.alerta{margin:10px 0 12px}
 .regform .ou{font:600 11px var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:2px}
 .regform .ou::before,.regform .ou::after{content:"";flex:1;border-top:1px dashed var(--line)}
+/* suínos — ficha do Chiqueiro */
+.su-tb .r{text-align:right}
+.su-tb tr.su-bl td{background:var(--soft);font:600 11px var(--f-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.su-tb .su-blc{float:right}
+.su-sub{display:block;font:500 11px var(--f-mono);color:var(--muted);letter-spacing:.02em;margin-top:1px}
+td .su-sub{white-space:nowrap}
+.panel>*{min-width:0}
+td.su-est{color:var(--muted)}
+.su-card{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:grid;gap:4px;font-size:14px}
+.su-card+.su-card{margin-top:-4px}
+.su-l1{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:24px}
+.su-l1 .selo{margin-left:0}
+.su-acoes{margin-left:auto;display:flex;gap:6px}
+.su-acoes-l{justify-content:flex-end;margin-top:6px}
+.su-st{font-size:14px}
+.su-hist{margin-top:2px}
+.su-ev.su-canc{opacity:.55}
+.su-ev.su-canc b{text-decoration:line-through}
+.su-chk{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--muted);cursor:pointer}
+.regform .su-chk input{width:auto;min-height:0;margin:2px 0 0}
+.su-erro{color:var(--bad);font-size:13px}
+.btn.bad{border-color:var(--bad);color:var(--bad)}
 .regform .btn.foto{min-height:44px}
 .ev .selo{margin-left:6px}
 .comp-list+.kv{margin-top:-10px;padding-top:10px;border-top:1px dashed var(--line)}
@@ -416,6 +438,10 @@ const CATALOGO_PREM=[
   ["data_venda_prevista","Data prevista de venda","data","geral"],
   ["preco_max_compra_cab","Preço máximo de compra","R$/cab","geral"],
   ["preco_arroba_ref","Preço de referência da arroba","R$/@","geral"]]],
+ ["Suínos",[
+  ["suinos_gestacao_dias","Gestação das matrizes (cobertura → parto)","dias","geral"],
+  ["suinos_desmame_dias","Idade dos leitões no desmame","dias","geral"],
+  ["suinos_aviso_parto_dias","Antecedência para levar a matriz à maternidade","dias","geral"]]],
  ["Água e rotina",[
   ["consumo_agua_l_cab_dia","Consumo de água","L/cab/dia","geral"],
   ["intervalo_inspecao_agua_dias","Intervalo de inspeção de água","dias","geral"]]]
@@ -561,8 +587,10 @@ async function carregar(){
       .catch(()=>q("pastagem_composicao","pasto_id,safra,ordem,cultivar,pct_area,area_ha,ano_formacao,metodo,mes_semeadura,data_semeadura,taxa_kg_ha,obs",["ordem"])).catch(()=>[]),
     /* leitura do pluviômetro pela foto (db/26): tentativas — só o administrador vê (RLS) — e se a função está ativa */
     sb.from("leituras_chuva_tentativas").select("id,estrutura_id,data,capturado_em,foto_path,distancia_m,precisao_m,resultado,mm,motivo,leitura_id,autor_email").order("criado_em",{ascending:false}).limit(30).then(({data})=>data||[]).catch(()=>[]),
-    chuvaFotoStatus()]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],tentChuva:r[20],chuvaFoto:r[21],quando:new Date()});
+    chuvaFotoStatus(),
+    /* suínos do Chiqueiro (db/28): blocos, reprodutores, movimentos, reprodução, pesagens, alimentação, sanidade — tolerante */
+    carregarSuinos()]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],tentChuva:r[20],chuvaFoto:r[21],su:r[22],quando:new Date()});
   salvarSnapshot();
 }
 /* ---------- posição do modelo (ponte modelo→banco) ----------
@@ -993,6 +1021,7 @@ function selEstrutura(id){selEstrId=id;selN=null;
   document.querySelectorAll(".map .estr").forEach(e=>e.classList.toggle("sel",e.dataset.eid===id));
   const st=(MAP.estruturas||[]).find(x=>x.id===id);const pn=document.getElementById("panel");if(!st||!pn)return;
   const reg=estrReg(st.nome);
+  if(reg&&reg.tipo==="suinos"){suFicha(st,reg,pn);return;}
   const tipos={estoque:"Estoque",maquinas:"Máquinas",aves:"Aves",suinos:"Suínos",ponto_agua:"Ponto de Água",cocho:"Cocho",pluviometro:"Pluviômetro"};
   const vinc=reg?D.eplinks.filter(l=>l.estrutura_id===reg.id).map(l=>D.pastos.find(p=>p.id===l.pasto_id)):[];
   const vp=vinc[0];
@@ -1063,6 +1092,572 @@ function regAbastecimento(eid){
     await carregar();rerender();}},"Registrar abastecimento");
   return h("div",{class:"regform"},h("div",{class:"badge"},"Registrar abastecimento"),
     h("div",{class:"grid2"},data,alimento),h("div",{class:"grid2"},kg,obs),btn);}
+
+/* ---------- suínos: ficha do Chiqueiro (db/28) ----------
+   Plantel = soma dos movimentos realizados (razão). Grupo = bloco × categoria × sexo × condição × destino;
+   matrizes e cachaço são grupos de 1 cabeça com identificação própria. O peso de um grupo é a última pesagem desde
+   que o grupo se formou no bloco; transferência, reclassificação, desmame e castração levam o peso junto.
+   Nada se apaga: corrigir = cancelar (o administrador cancela; os lançamentos ligados ao evento caem juntos). */
+const SU_CATS=["leitões lactentes","creche","recria — ponto de corte","recria avançada","adultos em engorda","matriz","cachaço"];
+const SU_MET=["estimativa por foto","informado","fita torácica","balança"];           /* ordem crescente de precisão */
+const SU_ABAS=[["plantel","Plantel"],["reproducao","Reprodução"],["pesagens","Pesagens"],["alimentacao","Alimentação"],["sanidade","Sanidade"]];
+const SU_ALIMENTOS=["Ração lactação","Ração gestação","Ração creche","Ração crescimento","Ração terminação","Milho","Farelo de soja","Mandioca","Verde / capim"];
+let suTab="plantel";
+const SU0={blocos:[],rep:[],mov:[],repro:[],pes:[],alim:[],san:[]};
+const su=()=>D.su||SU0;
+const suOk=r=>r.status==="realizado";
+const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
+const suBloco=id=>su().blocos.find(b=>b.id===id);
+const suBlocoNome=id=>suBloco(id)?.nome||"—";
+const suRep=id=>su().rep.find(r=>r.id===id);
+const suUuid=()=>(globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==="x"?r:(r&3|8)).toString(16);});
+const suNum=v=>{if(v==null||String(v).trim()==="")return null;const x=Number(String(v).replace(/\./g,"").replace(",","."));return Number.isFinite(x)?x:null;};
+const suNumDec=v=>{if(v==null||String(v).trim()==="")return null;const x=Number(String(v).replace(",","."));return Number.isFinite(x)?x:null;};
+const suDesc=(a,b)=>a.data<b.data?1:a.data>b.data?-1:((a.criado_em||"")<(b.criado_em||"")?1:-1);
+const suAsc=(a,b)=>-suDesc(a,b);
+const suDias=(de,ate)=>Math.round((new Date(ate||hojeIso())-new Date(de))/86400000);
+const suSomaDias=(iso,n)=>{const d=new Date(iso+"T12:00:00");d.setDate(d.getDate()+n);return isoDia(d);};
+const suKeyG=m=>[m.bloco_id,m.categoria,m.sexo,m.condicao||"—",m.destino||"",m.reprodutor_id||""].join("|");
+const suKeyP=m=>m.reprodutor_id?"r|"+m.reprodutor_id:[m.bloco_id,m.categoria,m.sexo,m.condicao||"—"].join("|");
+const suSexo=g=>g.sexo+(g.condicao&&g.condicao!=="—"?" · "+g.condicao:"");
+const suRotCat=g=>g.reprodutor_id?(suRep(g.reprodutor_id)?.identificacao||cap(g.categoria)):cap(g.categoria);
+const suSubCat=g=>{const t=g.reprodutor_id?(suRotCat(g).toLowerCase().includes(g.categoria)?null:g.categoria):g.destino;return t?h("small",{class:"su-sub"},t):null;};
+const suRotGrupo=g=>suBlocoNome(g.bloco_id)+" · "+suRotCat(g)+(g.reprodutor_id?"":" · "+suSexo(g))+(g.destino?" · "+g.destino:"");
+
+async function carregarSuinos(){
+  const q=(t,sel,ord)=>{let qq=sb.from(t).select(sel);if(ord)qq=qq.order(...ord);return qq.then(({data,error})=>{if(error)throw new Error(error.message);return data||[];});};
+  try{
+    const r=await Promise.all([
+      q("suinos_blocos","id,estrutura_id,numero,nome,descricao,ativo,obs",["numero"]),
+      q("suinos_reprodutores","id,identificacao,sexo,funcao,raca,nascimento,entrada,origem,situacao,saida,obs",["identificacao"]),
+      q("suinos_movimentos","id,data,tipo,bloco_id,categoria,sexo,condicao,destino,reprodutor_id,cabecas,par_id,origem_tipo,origem_id,peso_vivo_kg,peso_carcaca_kg,valor_rs,contraparte,obs,status,autor_email,criado_em",["data",{ascending:false}]),
+      q("suinos_reproducao","id,matriz_id,tipo,data,cachaco_id,metodo,resultado,vivos_f,vivos_m,natimortos,mumificados,desmamados,peso_medio_kg,bloco_id,par_id,obs,status,autor_email,criado_em",["data",{ascending:false}]),
+      q("suinos_pesagens","id,data,bloco_id,categoria,sexo,condicao,reprodutor_id,cabecas,metodo,peso_min_kg,peso_max_kg,peso_medio_kg,perimetro_cm,comprimento_cm,par_id,obs,status,autor_email,criado_em",["data",{ascending:false}]),
+      q("suinos_alimentacao","id,data,bloco_id,alimento,quantidade_kg,obs,status,autor_email,criado_em",["data",{ascending:false}]),
+      q("suinos_sanidade","id,data,tipo,produto,dose,bloco_id,categoria,reprodutor_id,cabecas,par_id,obs,status,autor_email,criado_em",["data",{ascending:false}])]);
+    return {blocos:r[0],rep:r[1],mov:r[2],repro:r[3],pes:r[4],alim:r[5],san:r[6]};
+  }catch(e){return {...SU0};}
+}
+
+/* ---- plantel ---- */
+const suOrdGrupo=(a,b)=>{const ba=suBloco(a.bloco_id)?.numero??99,bb=suBloco(b.bloco_id)?.numero??99;if(ba!==bb)return ba-bb;
+  const ca=SU_CATS.indexOf(a.categoria),cb=SU_CATS.indexOf(b.categoria);if(ca!==cb)return ca-cb;
+  if(a.sexo!==b.sexo)return a.sexo<b.sexo?-1:1;
+  return (suRep(a.reprodutor_id)?.identificacao||a.destino||"")<(suRep(b.reprodutor_id)?.identificacao||b.destino||"")?-1:1;};
+function suPlantel(){
+  const g=new Map();
+  for(const m of su().mov){if(!suOk(m))continue;const k=suKeyG(m);
+    const x=g.get(k)||{bloco_id:m.bloco_id,categoria:m.categoria,sexo:m.sexo,condicao:m.condicao||"—",destino:m.destino||null,reprodutor_id:m.reprodutor_id||null,cab:0};
+    x.cab+=m.cabecas;g.set(k,x);}
+  return [...g.values()].filter(x=>x.cab!==0).sort(suOrdGrupo);
+}
+const suGrupos=()=>suPlantel().filter(g=>g.cab>0);
+const suCabChave=kp=>suPlantel().filter(g=>suKeyP(g)===kp).reduce((s,g)=>s+g.cab,0);
+const suBlocoDoRep=id=>suGrupos().find(g=>g.reprodutor_id===id)?.bloco_id||null;
+const suAtivos=f=>su().rep.filter(r=>r.situacao==="ativo"&&(!f||r.funcao===f)).sort((a,b)=>a.identificacao.localeCompare(b.identificacao,"pt-BR",{numeric:true}));
+/* início do grupo (para o peso): última data em que o saldo da chave de peso passou de zero para positivo */
+function suInicio(kp){
+  let s=0,ini=null;
+  for(const m of su().mov.filter(m=>suOk(m)&&suKeyP(m)===kp).sort(suAsc)){const antes=s;s+=m.cabecas;if(antes<=0&&s>0)ini=m.data;}
+  return ini;}
+const suPesagensGrupo=g=>{const kp=suKeyP(g);const ini=g.reprodutor_id?null:suInicio(kp);
+  return su().pes.filter(p=>suOk(p)&&suKeyP(p)===kp&&(!ini||p.data>=ini)).sort(suDesc);};
+const suPeso=g=>suPesagensGrupo(g)[0]||null;
+const suMedido=p=>p&&(p.metodo==="balança"||p.metodo==="fita torácica");
+function suGmd(g){const ps=suPesagensGrupo(g).filter(suMedido);if(ps.length<2)return null;
+  const a=ps[0],b=ps.find(p=>p.data<a.data);if(!b)return null;const d=suDias(b.data,a.data);return d>0?(a.peso_medio_kg-b.peso_medio_kg)/d:null;}
+const suFita=(per,comp)=>per&&comp?per*per*comp/14400:null;
+
+/* peso levado de um grupo de origem para o grupo de destino (antes de gravar o movimento) */
+function suPesoLevado(orig,dest,cab,data,par){
+  if(suKeyP(orig)===suKeyP(dest))return null;
+  const po=suPeso(orig);if(!po)return null;
+  const jaNoDestino=suCabChave(suKeyP(dest));const pd=jaNoDestino>0?suPeso(dest):null;
+  if(jaNoDestino>0&&!pd)return null;
+  const tot=jaNoDestino+cab,mix=(a,b)=>a==null||b==null?null:Math.round((Number(a)*jaNoDestino+Number(b)*cab)/tot*10)/10;
+  const r={data,bloco_id:dest.bloco_id,categoria:dest.categoria,sexo:dest.sexo,condicao:dest.condicao||"—",reprodutor_id:dest.reprodutor_id||null,
+    cabecas:tot,metodo:po.metodo,peso_min_kg:po.peso_min_kg,peso_max_kg:po.peso_max_kg,peso_medio_kg:Number(po.peso_medio_kg),
+    obs:"Peso trazido do grupo "+suRotGrupo(orig),par_id:par,autor_email:D.email};
+  if(pd){r.peso_medio_kg=mix(pd.peso_medio_kg,po.peso_medio_kg);r.peso_min_kg=mix(pd.peso_min_kg,po.peso_min_kg);r.peso_max_kg=mix(pd.peso_max_kg,po.peso_max_kg);
+    r.metodo=SU_MET.indexOf(pd.metodo)<SU_MET.indexOf(po.metodo)?pd.metodo:po.metodo;r.obs="Média ponderada ao juntar com "+suRotGrupo(orig);}
+  return r;
+}
+/* peso medido de cabeças que chegam a um grupo: se o grupo já tem animais pesados, grava a média ponderada */
+function suPesoNovo(dest,cab,kg,metodo,data,par,obs){
+  const ja=suCabChave(suKeyP(dest)),pd=ja>0?suPeso(dest):null;
+  const r={data,bloco_id:dest.bloco_id,categoria:dest.categoria,sexo:dest.sexo,condicao:dest.condicao||"—",reprodutor_id:dest.reprodutor_id||null,
+    cabecas:ja+cab,metodo,peso_min_kg:null,peso_max_kg:null,peso_medio_kg:kg,obs,par_id:par,autor_email:D.email};
+  if(pd){r.peso_medio_kg=Math.round((Number(pd.peso_medio_kg)*ja+kg*cab)/(ja+cab)*10)/10;r.metodo=SU_MET.indexOf(pd.metodo)<SU_MET.indexOf(metodo)?pd.metodo:metodo;r.obs=obs+" · média ponderada com o grupo";}
+  else if(ja>0)r.cabecas=cab;
+  return r;
+}
+/* uma saída (−) do grupo de origem e uma entrada (+) no grupo de destino, ligadas pelo par */
+function suPar(orig,dest,cab,data,tipo,par,extra={}){
+  const base={data,tipo,par_id:par,autor_email:D.email,status:"realizado",...extra};
+  return [{...base,bloco_id:orig.bloco_id,categoria:orig.categoria,sexo:orig.sexo,condicao:orig.condicao||"—",destino:orig.destino||null,reprodutor_id:orig.reprodutor_id||null,cabecas:-cab},
+          {...base,bloco_id:dest.bloco_id,categoria:dest.categoria,sexo:dest.sexo,condicao:dest.condicao||"—",destino:dest.destino||null,reprodutor_id:dest.reprodutor_id||null,cabecas:cab}];
+}
+async function suIns(t,rows){if(!rows||(Array.isArray(rows)&&!rows.length))return;const{error}=await sb.from(t).insert(rows);if(error)throw new Error(error.message);}
+async function suUpd(t,campos,col,val){const{error}=await sb.from(t).update(campos).eq(col,val);if(error)throw new Error(error.message);}
+async function suGravar(btn,fn){const t0=btn.textContent;btn.disabled=true;btn.textContent="Gravando…";
+  try{await fn();await carregar();rerender();}catch(e){btn.disabled=false;btn.textContent=t0;suErro(btn,e.message);}}
+function suErro(btn,msg){const f=btn.closest(".regform")||btn.parentElement;let n=f.querySelector(".su-erro");
+  if(!n){n=h("div",{class:"su-erro"});f.append(n);}n.textContent=msg;}
+
+/* ---- alertas: parto, desmame, sanidade programada, saldo inconsistente ---- */
+function suEstadoMatriz(id){
+  const ev=su().repro.filter(e=>suOk(e)&&e.matriz_id===id).sort(suDesc);
+  const G=premNum("suinos_gestacao_dias",["geral"],114),W=premNum("suinos_desmame_dias",["geral"],42);
+  const u=ev[0];
+  if(!u){const b=suBlocoDoRep(id);const so=b&&suGrupos().filter(g=>g.bloco_id===b&&g.categoria==="matriz").length===1;
+    const lt=so?suGrupos().filter(g=>g.bloco_id===b&&g.categoria==="leitões lactentes").reduce((s,g)=>s+g.cab,0):0;
+    return {fase:null,txt:lt?"Com "+lt+" leitões lactentes no "+suBlocoNome(b)+" · registrar o parto para prever o desmame":"Sem registro reprodutivo"};}
+  if(u.tipo==="cobertura"||(u.tipo==="diagnóstico"&&u.resultado==="positivo")){
+    const cob=u.tipo==="cobertura"?u:ev.find(e=>e.tipo==="cobertura");
+    if(cob){const prev=suSomaDias(cob.data,G),falta=-suDias(prev);
+      return {fase:"gestante",prev,falta,cob,txt:(u.tipo==="diagnóstico"?"Prenhe (diagnóstico "+dmy(u.data).slice(0,5)+")":"Coberta em "+dmy(cob.data).slice(0,5))+" · parto previsto "+dmy(prev).slice(0,5)}; }
+  }
+  if(u.tipo==="parto"){const prev=suSomaDias(u.data,W),falta=-suDias(prev),lact=suDias(u.data);
+    return {fase:"lactante",prev,falta,parto:u,lact,txt:(lact===0?"Parida hoje":"Parida em "+dmy(u.data).slice(0,5)+" · "+lact+(lact===1?" dia":" dias")+" de lactação")+" · desmame previsto "+dmy(prev).slice(0,5)};}
+  const vazia=u.tipo==="desmame"?"desmame em "+dmy(u.data).slice(0,5):u.tipo==="diagnóstico"?"diagnóstico negativo em "+dmy(u.data).slice(0,5):u.tipo+" em "+dmy(u.data).slice(0,5);
+  const dv=suDias(u.data);return {fase:"vazia",desde:u.data,txt:(dv===0?"Vazia desde hoje":"Vazia há "+dv+(dv===1?" dia":" dias"))+" · "+vazia};
+}
+function suAlertas(){
+  const A=[];const aviso=premNum("suinos_aviso_parto_dias",["geral"],7);
+  const al=(cls,tit,txt)=>h("div",{class:"alerta"+(cls?" "+cls:"")},h("b",{},tit),h("span",{},txt));
+  for(const m of suAtivos("matriz")){const e=suEstadoMatriz(m.id);
+    if(e.fase==="gestante"&&e.falta<0)A.push(al("bad","Parto atrasado",m.identificacao+" · previsto para "+dmy(e.prev)+" (há "+(-e.falta)+" dias): registrar o parto ou o diagnóstico."));
+    else if(e.fase==="gestante"&&e.falta<=aviso)A.push(al("","Parto em "+(e.falta===0?"hoje":e.falta+(e.falta===1?" dia":" dias")),m.identificacao+" · previsto para "+dmy(e.prev)+" — levar à maternidade."));
+    if(e.fase==="lactante"){const b=suBlocoDoRep(m.id);const lt=suGrupos().filter(g=>g.bloco_id===b&&g.categoria==="leitões lactentes").reduce((s,g)=>s+g.cab,0);
+      if(e.falta<0)A.push(al("bad","Desmame atrasado",m.identificacao+" · previsto para "+dmy(e.prev)+" ("+e.lact+" dias de lactação"+(lt?", "+lt+" leitões":"")+")."));
+      else if(e.falta<=7)A.push(al("","Desmame em "+(e.falta===0?"hoje":e.falta+(e.falta===1?" dia":" dias")),m.identificacao+" · "+dmy(e.prev)+(lt?" · "+lt+" leitões":"")+"."));}
+  }
+  const lim=suSomaDias(hojeIso(),3);
+  su().san.filter(s=>s.status==="programado"&&s.data<=lim).sort(suAsc).forEach(s=>{const atras=s.data<hojeIso();
+    A.push(al(atras?"bad":"",atras?"Sanidade atrasada":"Sanidade programada",cap(s.tipo)+(s.produto?" — "+s.produto:"")+" · "+suAlvoTxt(s)+" · "+dmy(s.data)+"."));});
+  suPlantel().filter(g=>g.cab<0).forEach(g=>A.push(al("bad","Saldo negativo",suRotGrupo(g)+": "+g.cab+" cab. Conferir os lançamentos.")));
+  return A;
+}
+const suAlvoTxt=s=>s.reprodutor_id?(suRep(s.reprodutor_id)?.identificacao||"—"):s.bloco_id?suBlocoNome(s.bloco_id)+(s.categoria?" · "+cap(s.categoria):"")+(s.cabecas?" · "+s.cabecas+" cab":""):"Todo o plantel";
+
+/* ---- cancelar (administrador): o lançamento e o que nasceu dele ---- */
+function suBtnCancelar(tabela,row){
+  if(!D.admin||row.status==="cancelado")return null;
+  const b=h("button",{class:"btn sm su-x",type:"button",title:"Cancelar este lançamento (fica no histórico)"},"Cancelar");
+  b.addEventListener("click",async()=>{
+    if(b.dataset.conf!=="1"){b.dataset.conf="1";b.textContent="Confirmar";b.classList.add("bad");setTimeout(()=>{if(b.isConnected){b.dataset.conf="";b.textContent="Cancelar";b.classList.remove("bad");}},4000);return;}
+    await suGravar(b,async()=>{
+      await suUpd(tabela,{status:"cancelado"},"id",row.id);
+      if(row.par_id){await suUpd("suinos_movimentos",{status:"cancelado"},"par_id",row.par_id);
+        await suUpd("suinos_pesagens",{status:"cancelado"},"par_id",row.par_id);
+        if(tabela!=="suinos_reproducao")await suUpd("suinos_reproducao",{status:"cancelado"},"par_id",row.par_id);
+        if(tabela!=="suinos_sanidade")await suUpd("suinos_sanidade",{status:"cancelado"},"par_id",row.par_id);}
+      /* reprodutor que tinha saído do plantel volta a ativo; o que tinha sido criado no evento fica cancelado */
+      const movs=row.par_id?su().mov.filter(m=>m.par_id===row.par_id):tabela==="suinos_movimentos"?[row]:[];
+      for(const m of movs.filter(m=>m.reprodutor_id)){const r=suRep(m.reprodutor_id);if(!r)continue;
+        if(m.cabecas<0&&r.situacao!=="ativo")await suUpd("suinos_reprodutores",{situacao:"ativo",saida:null},"id",r.id);
+        if(m.cabecas>0&&r.entrada===m.data&&m.tipo==="reclassificação")await suUpd("suinos_reprodutores",{situacao:"cancelado"},"id",r.id);}
+    });});
+  return b;
+}
+const suAcoes=(...b)=>{b=b.filter(Boolean);return b.length?h("span",{class:"su-acoes"},...b):null;};
+const suSeloSt=s=>s==="cancelado"?h("span",{class:"selo hist"},"Cancelado"):s==="programado"?h("span",{class:"selo prog"},"Programado"):null;
+
+/* ---- ficha ---- */
+function suFicha(st,reg,pn){
+  const tabs=h("div",{class:"ptabs",role:"tablist"},SU_ABAS.map(([k,t])=>h("button",{role:"tab","aria-selected":String(k===suTab),onclick:()=>{suTab=k;selEstrutura(st.id);}},t)));
+  const top=h("div",{class:"ficha-top"},tabs,h("div",{class:"ph"},h("h3",{},st.nome),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar")));
+  let corpo;
+  if(!su().blocos.length)corpo=[h("div",{class:"note"},"Os blocos do Chiqueiro ainda não estão no banco.")];
+  else if(suTab==="reproducao")corpo=suAbaReproducao();
+  else if(suTab==="pesagens")corpo=suAbaPesagens();
+  else if(suTab==="alimentacao")corpo=suAbaAlimentacao();
+  else if(suTab==="sanidade")corpo=suAbaSanidade();
+  else corpo=suAbaPlantel();
+  pn.replaceChildren(...[top,...corpo,reg?fotoStrip("estrutura",reg.id,suTab):null].filter(Boolean));
+  mostrarFicha(pn);
+}
+
+/* ---- aba Plantel ---- */
+function suAbaPlantel(){
+  const out=[...suAlertas()];
+  const gs=suGrupos();
+  const tot=gs.reduce((s,g)=>s+g.cab,0),fe=gs.filter(g=>g.sexo==="F").reduce((s,g)=>s+g.cab,0);
+  let pv=0,pmin=0,pmax=0,com=0,est=0;
+  gs.forEach(g=>{const p=suPeso(g);if(!p)return;com+=g.cab;const md=Number(p.peso_medio_kg);pv+=g.cab*md;
+    pmin+=g.cab*Number(p.peso_min_kg??md);pmax+=g.cab*Number(p.peso_max_kg??md);if(p.metodo==="estimativa por foto")est+=g.cab;});
+  out.push(h("div",{class:"badge"},"Plantel",h("span",{class:"selo vig"},"Posição em "+dmy(hojeIso()))));
+  const kv=[h("dt",{},"Cabeças"),h("dd",{},tot+" · "+fe+" F · "+(tot-fe)+" M")];
+  if(com){const nota=[est===tot?"estimativa por foto":est?est+" de "+tot+" cab. por foto":null,tot>com?(tot-com)+" sem peso":null].filter(Boolean).join(" · ");
+    kv.push(h("dt",{},"Peso vivo"),h("dd",{},nf(pv,0)+" kg"+(Math.round(pmax)>Math.round(pmin)?" · "+nf(pmin,0)+"–"+nf(pmax,0):""),nota?h("small",{class:"su-sub"},nota):null));}
+  out.push(h("dl",{class:"kv"},...kv));
+  /* por bloco */
+  const linhas=[];let estimado=false;
+  su().blocos.filter(b=>b.ativo!==false).forEach(b=>{const gb=gs.filter(g=>g.bloco_id===b.id);if(!gb.length)return;
+    linhas.push(h("tr",{class:"su-bl"},h("td",{colspan:"4"},b.nome+(b.descricao?" · "+b.descricao.toLowerCase():""),h("span",{class:"su-blc"},gb.reduce((s,g)=>s+g.cab,0)+" cab"))));
+    gb.forEach(g=>{const p=suPeso(g);const est=p&&p.metodo==="estimativa por foto";if(est)estimado=true;
+      linhas.push(h("tr",{},h("td",{},suRotCat(g),suSubCat(g)),
+        h("td",{class:"n"},g.sexo,g.condicao&&g.condicao!=="—"&&!g.reprodutor_id?h("small",{class:"su-sub"},g.condicao):null),h("td",{class:"n r"},String(g.cab)),
+        h("td",{class:"n r"+(est?" su-est":""),title:p?(p.metodo+" · "+dmy(p.data)):""},p?nf(p.peso_medio_kg,0):"—")));});});
+  out.push(h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Categoria"),h("th",{},"Sexo"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"kg/cab"))),h("tbody",{},...linhas)))));
+  const vazios=su().blocos.filter(b=>b.ativo!==false&&!gs.some(g=>g.bloco_id===b.id));
+  const notas=[estimado?"Peso em cinza: estimativa por foto (±25%), até a pesagem.":null,vazios.length?"Vazios: "+vazios.map(b=>b.nome).join(", ")+".":null].filter(Boolean);
+  if(notas.length)out.push(h("div",{class:"note"},notas.join(" ")));
+  /* por faixa */
+  const fx=SU_CATS.map(c=>{const gc=gs.filter(g=>g.categoria===c);if(!gc.length)return null;
+    const cab=gc.reduce((s,g)=>s+g.cab,0);let kg=0,cp=0;gc.forEach(g=>{const p=suPeso(g);if(p){kg+=g.cab*Number(p.peso_medio_kg);cp+=g.cab;}});
+    return h("tr",{},h("td",{},cap(c)),h("td",{class:"n r"},String(cab)),h("td",{class:"n r"},String(gc.filter(g=>g.sexo==="F").reduce((s,g)=>s+g.cab,0))),
+      h("td",{class:"n r"},String(gc.filter(g=>g.sexo==="M").reduce((s,g)=>s+g.cab,0))),h("td",{class:"n r"},cp?nf(kg/cp,0):"—"));}).filter(Boolean);
+  out.push(h("div",{class:"badge"},"Por faixa"),h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},
+    h("thead",{},h("tr",{},h("th",{},"Faixa"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"F"),h("th",{class:"r"},"M"),h("th",{class:"r"},"kg/cab"))),h("tbody",{},...fx)))));
+  /* movimentos recentes (pares juntos numa linha) */
+  const vistos=new Set(),evs=[];
+  for(const m of [...su().mov].sort(suDesc)){const k=m.par_id||(m.tipo==="inventário"?"inv|"+m.data:null);
+    if(k){if(vistos.has(k))continue;vistos.add(k);}evs.push(m);if(evs.length>=8)break;}
+  out.push(h("div",{class:"badge"},"Movimentos recentes"),h("div",{},...evs.map(suLinhaMov)));
+  out.push(suFormMov());
+  return out;
+}
+function suLinhaMov(m){
+  if(m.tipo==="inventário"){const iv=su().mov.filter(x=>x.tipo==="inventário"&&x.data===m.data&&suOk(x));
+    const nb=new Set(iv.map(x=>x.bloco_id)).size;
+    return h("div",{class:"ev su-ev"},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(m.data).slice(0,5)+" · "),h("b",{},"Inventário")),
+      h("div",{},iv.reduce((s,x)=>s+x.cabecas,0)+" cab em "+nb+(nb>1?" blocos":" bloco")),/\(([^)]+)\)/.test(m.obs||"")?h("div",{class:"d"},cap(/\(([^)]+)\)/.exec(m.obs)[1])):null);}
+  const legs=m.par_id?su().mov.filter(x=>x.par_id===m.par_id):[m];
+  const sai=legs.find(x=>x.cabecas<0),ent=legs.filter(x=>x.cabecas>0);const cab=Math.abs((sai||m).cabecas);
+  let txt;
+  if(m.par_id&&m.origem_tipo){const base=sai?sai.bloco_id:m.bloco_id;
+    txt=suBlocoNome(base)+": "+ent.map(x=>{const o=legs.find(y=>y.cabecas<0&&(y.reprodutor_id||null)===(x.reprodutor_id||null)&&y.sexo===x.sexo);
+      return (x.reprodutor_id?suRotCat(x):x.cabecas+" "+suRotCat(x)+" "+suSexo(x))+(o&&o.bloco_id!==x.bloco_id?" → "+suBlocoNome(x.bloco_id):"");}).join(" + ");}
+  else if(m.tipo==="transferência"&&sai&&ent[0])txt=cab+" cab · "+suRotCat(sai)+(sai.reprodutor_id?"":" "+suSexo(sai))+" · "+suBlocoNome(sai.bloco_id)+" → "+suBlocoNome(ent[0].bloco_id);
+  else if(m.tipo==="reclassificação"&&sai&&ent[0])txt=cab+" cab · "+suBlocoNome(sai.bloco_id)+" · "+suRotCat(sai)+(sai.destino?" ("+sai.destino+")":"")+" "+suSexo(sai)+" → "+suRotCat(ent[0])+(ent[0].destino?" ("+ent[0].destino+")":"")+(ent[0].reprodutor_id?"":" "+suSexo(ent[0]));
+  else txt=(m.cabecas>0?"+":"−")+Math.abs(m.cabecas)+" · "+suRotGrupo(m);
+  const fin=[m.peso_vivo_kg?nf(m.peso_vivo_kg,0)+" kg vivo":null,m.peso_carcaca_kg?nf(m.peso_carcaca_kg,0)+" kg carcaça":null,
+    m.valor_rs!=null&&D.socio?"R$ "+nf(m.valor_rs,2):null,m.contraparte||null].filter(Boolean).join(" · ");
+  const titulo=m.origem_tipo?cap(m.origem_tipo):m.tipo==="reclassificação"&&sai&&ent[0]?(sai.categoria!==ent[0].categoria?"Mudança de faixa":(sai.destino||null)!==(ent[0].destino||null)?"Mudança de destino":"Mudança de condição"):cap(m.tipo);
+  return h("div",{class:"ev su-ev"+(m.status==="cancelado"?" su-canc":"")},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(m.data).slice(0,5)+" · "),h("b",{},titulo),suSeloSt(m.status),suAcoes(suBtnCancelar("suinos_movimentos",m))),
+    h("div",{},txt),fin?h("div",{class:"d"},fin):null,m.obs&&m.tipo!=="inventário"?h("div",{class:"d"},m.obs):null);
+}
+
+/* formulário de movimento: saídas e mudanças usam um grupo do plantel; entradas descrevem o grupo que chega */
+function suFormMov(){
+  const hoje=hojeIso();
+  const TIPOS=[["transferência","Transferência entre blocos"],["reclassificação","Mudança de faixa ou destino"],["venda","Venda"],["abate","Abate"],["morte","Morte"],["compra","Compra / entrada"],["ajuste+","Ajuste de contagem — sobra"],["ajuste-","Ajuste de contagem — falta"]];
+  const tipo=h("select",{},TIPOS.map(([v,l])=>h("option",{value:v},l)));
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const gs=suGrupos();
+  const grupo=h("select",{},gs.map((g,i)=>h("option",{value:String(i)},suRotGrupo(g)+" · "+g.cab+" cab")));
+  const cab=h("input",{inputmode:"numeric",placeholder:"cabeças"});
+  const bOpts=pre=>su().blocos.filter(b=>b.ativo!==false).map(b=>h("option",{value:b.id},pre+b.nome));
+  const blocoDest=h("select",{},bOpts("Para o "));
+  const novaCat=h("select",{},SU_CATS.map(c=>h("option",{value:c},"Faixa: "+cap(c))));
+  const novoDest=h("select",{},[["","Sem destino definido"],["corte","Destino corte"],["banha","Destino banha"],["reposição","Reposição de matriz"]].map(([v,l])=>h("option",{value:v},l)));
+  const ident=h("input",{type:"text",placeholder:"identificação do reprodutor (ex.: nome ou marca)"});
+  const eBloco=h("select",{},bOpts("Entra no ")),eCat=h("select",{},SU_CATS.filter(c=>c!=="matriz"&&c!=="cachaço").map(c=>h("option",{value:c},cap(c))));
+  const eSexo=h("select",{},[["F","Fêmea"],["M|capado","Macho capado"],["M|inteiro","Macho inteiro"]].map(([v,l])=>h("option",{value:v},l)));
+  const eDest=h("select",{},[["","Sem destino definido"],["corte","Destino corte"],["banha","Destino banha"],["reposição","Reposição de matriz"]].map(([v,l])=>h("option",{value:v},l)));
+  const pv=h("input",{inputmode:"decimal",placeholder:"peso vivo total (kg)"}),pc=h("input",{inputmode:"decimal",placeholder:"peso de carcaça total (kg)"});
+  const valor=h("input",{inputmode:"decimal",placeholder:"valor total (R$)"}),contra=h("input",{type:"text",placeholder:"comprador / fornecedor"});
+  const obs=h("input",{type:"text",placeholder:"observação (causa da morte, motivo…)"});
+  const rGrupo=h("div",{},grupo),rCab=h("div",{class:"grid2"},cab,blocoDest);
+  const rRecl=h("div",{class:"grid2"},novaCat,novoDest),rIdent=h("div",{},ident);
+  const rEnt=h("div",{class:"grid2"},eBloco,eCat),rEnt2=h("div",{class:"grid2"},eSexo,eDest),rEntCab=h("div",{class:"grid2"},cab.cloneNode(),h("span",{}));
+  const cabE=rEntCab.firstChild;
+  const rPeso=h("div",{class:"grid2"},pv,pc),rValor=h("div",{class:"grid2"},valor,contra);
+  const grp=()=>gs[+grupo.value];
+  function ajustar(){const t=tipo.value,ent=t==="compra"||t==="ajuste+";const g=grp();
+    rGrupo.hidden=ent;rCab.hidden=ent;rEnt.hidden=!ent;rEnt2.hidden=!ent;rEntCab.hidden=!ent;
+    blocoDest.hidden=t!=="transferência";if(g&&blocoDest.value===g.bloco_id){const o=[...blocoDest.options].find(o=>o.value!==g.bloco_id);if(o)blocoDest.value=o.value;}
+    rRecl.hidden=t!=="reclassificação";
+    rIdent.hidden=!(t==="reclassificação"&&(novaCat.value==="matriz"||novaCat.value==="cachaço"));
+    rPeso.hidden=!(t==="venda"||t==="abate"||t==="morte");pc.hidden=t==="morte";
+    rValor.hidden=!(t==="venda"||t==="compra");valor.hidden=!D.socio;
+    if(g&&cab.dataset.g!==grupo.value){cab.dataset.g=grupo.value;cab.value=String(g.cab);}cab.disabled=!!g?.reprodutor_id;
+    if(t==="reclassificação"&&g&&rRecl.dataset.g!==grupo.value){novaCat.value=g.categoria;novoDest.value=g.destino||"";rRecl.dataset.g=grupo.value;}
+    btn.textContent=t==="transferência"?"Registrar transferência":t==="reclassificação"?"Registrar mudança":t==="ajuste+"||t==="ajuste-"?"Registrar ajuste":"Registrar "+t;}
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar");
+  [tipo,grupo,novaCat].forEach(e=>e.addEventListener("change",ajustar));
+  btn.addEventListener("click",()=>{const t=tipo.value,par=suUuid(),d=data.value;
+    if(!d||d>hoje)return suErro(btn,"Data inválida (não pode ser futura).");
+    const ent=t==="compra"||t==="ajuste+";
+    const n=suNum(ent?cabE.value:cab.value);if(!n||n<1||!Number.isInteger(n))return suErro(btn,"Informe o número de cabeças.");
+    const extra={obs:obs.value||null};
+    if(ent){const [sx,cd]=eSexo.value.split("|");
+      const row={data:d,tipo:t==="compra"?"compra":"ajuste de contagem",bloco_id:eBloco.value,categoria:eCat.value,sexo:sx,condicao:cd||"—",destino:eDest.value||null,cabecas:n,
+        valor_rs:t==="compra"&&D.socio?suNumDec(valor.value):null,contraparte:t==="compra"?(contra.value||null):null,autor_email:D.email,...extra};
+      return suGravar(btn,()=>suIns("suinos_movimentos",row));}
+    const g=grp();if(!g)return suErro(btn,"Escolha o grupo do plantel.");
+    if(n>g.cab)return suErro(btn,"O grupo tem "+g.cab+" cab.");
+    if(t==="transferência"){if(blocoDest.value===g.bloco_id)return suErro(btn,"Escolha um bloco diferente do atual.");
+      const dest={...g,bloco_id:blocoDest.value};const ps=suPesoLevado(g,dest,n,d,par);
+      return suGravar(btn,async()=>{await suIns("suinos_movimentos",suPar(g,dest,n,d,"transferência",par,extra));if(ps)await suIns("suinos_pesagens",ps);});}
+    if(t==="reclassificação"){const nc=novaCat.value,nd=novoDest.value||null;
+      if(nc===g.categoria&&nd===(g.destino||null))return suErro(btn,"Mude a faixa ou o destino.");
+      const vaiRep=nc==="matriz"||nc==="cachaço";
+      if(vaiRep){if(n!==1)return suErro(btn,"Reprodutor entra um por vez (1 cabeça).");if(!ident.value.trim())return suErro(btn,"Informe a identificação do reprodutor.");
+        if(su().rep.some(r=>r.identificacao.toLowerCase()===ident.value.trim().toLowerCase()))return suErro(btn,"Já existe um reprodutor com essa identificação.");
+        if((nc==="matriz"&&g.sexo!=="F")||(nc==="cachaço"&&(g.sexo!=="M"||g.condicao==="capado")))return suErro(btn,nc==="matriz"?"Matriz deve ser fêmea.":"Cachaço deve ser macho inteiro.");}
+      const rid=vaiRep?suUuid():null;
+      const dest={...g,categoria:nc,destino:vaiRep?null:nd,reprodutor_id:rid,condicao:vaiRep?(nc==="cachaço"?"inteiro":"—"):g.condicao};
+      const ps=suPesoLevado(g,dest,n,d,par);
+      return suGravar(btn,async()=>{
+        if(vaiRep)await suIns("suinos_reprodutores",{id:rid,identificacao:ident.value.trim(),sexo:g.sexo,funcao:nc,entrada:d,origem:"plantel ("+suRotGrupo(g)+")",autor_email:D.email});
+        await suIns("suinos_movimentos",suPar(g,dest,n,d,"reclassificação",par,extra));if(ps)await suIns("suinos_pesagens",ps);
+        if(g.reprodutor_id&&!vaiRep)await suUpd("suinos_reprodutores",{situacao:"descarte",saida:d},"id",g.reprodutor_id);});}
+    /* saídas: venda, abate, morte, ajuste − */
+    const row={data:d,tipo:t==="ajuste-"?"ajuste de contagem":t,bloco_id:g.bloco_id,categoria:g.categoria,sexo:g.sexo,condicao:g.condicao,destino:g.destino,reprodutor_id:g.reprodutor_id,cabecas:-n,
+      peso_vivo_kg:rPeso.hidden?null:suNumDec(pv.value),peso_carcaca_kg:rPeso.hidden||pc.hidden?null:suNumDec(pc.value),
+      valor_rs:t==="venda"&&D.socio?suNumDec(valor.value):null,contraparte:t==="venda"?(contra.value||null):null,autor_email:D.email,...extra};
+    const sit={venda:"vendido",abate:"abatido",morte:"morto"}[t];
+    return suGravar(btn,async()=>{await suIns("suinos_movimentos",row);if(g.reprodutor_id&&sit)await suUpd("suinos_reprodutores",{situacao:sit,saida:d},"id",g.reprodutor_id);});
+  });
+  const f=h("div",{class:"regform"},h("div",{class:"badge"},"Registrar movimento"),h("div",{class:"grid2"},tipo,data),rGrupo,rCab,rEnt,rEnt2,rEntCab,rRecl,rIdent,rPeso,rValor,obs,btn);
+  ajustar();return f;
+}
+
+/* ---- aba Reprodução ---- */
+function suAbaReproducao(){
+  const out=[];const mats=suAtivos("matriz"),cach=suAtivos("cachaço");
+  const G=premNum("suinos_gestacao_dias",["geral"],114),W=premNum("suinos_desmame_dias",["geral"],42);
+  out.push(h("div",{class:"badge"},"Matrizes",h("span",{class:"selo vig"},mats.length+" ativas")));
+  mats.forEach(m=>{const e=suEstadoMatriz(m.id);const ev=su().repro.filter(x=>x.matriz_id===m.id).sort(suDesc);
+    const partos=ev.filter(x=>suOk(x)&&x.tipo==="parto"),desm=ev.filter(x=>suOk(x)&&x.tipo==="desmame");
+    const nv=partos.map(p=>(p.vivos_f||0)+(p.vivos_m||0));
+    const selo=e.fase==="gestante"?h("span",{class:"selo "+(e.falta<0?"bad":"vig")},"Gestante"):e.fase==="lactante"?h("span",{class:"selo "+(e.falta<0?"bad":"vig")},"Lactante"):e.fase==="vazia"?h("span",{class:"selo prog"},"Vazia"):null;
+    const ind=[partos.length?partos.length+(partos.length>1?" partos":" parto")+" · "+nf(nv.reduce((s,v)=>s+v,0)/nv.length,1)+" nascidos vivos/parto":null,
+      desm.length&&desm.some(x=>x.desmamados!=null)?nf(desm.reduce((s,x)=>s+(x.desmamados||0),0)/desm.filter(x=>x.desmamados!=null).length,1)+" desmamados/leitegada":null].filter(Boolean).join(" · ");
+    out.push(h("div",{class:"su-card"},
+      h("div",{class:"su-l1"},h("b",{},m.identificacao),h("span",{class:"d"},suBlocoNome(suBlocoDoRep(m.id))+(m.raca?" · "+m.raca:"")),selo,suAcoes(D.admin?suBtnEditarRep(m):null)),
+      h("div",{class:"su-st"},e.txt+(e.fase==="gestante"?(e.falta>=0?" (em "+e.falta+" dias)":" (há "+(-e.falta)+" dias)"):"")),
+      ind?h("div",{class:"d"},ind):null,
+      ev.length?h("div",{class:"su-hist"},...ev.slice(0,4).map(suLinhaRepro)):null));});
+  cach.forEach(c=>{const cobs=su().repro.filter(x=>suOk(x)&&x.tipo==="cobertura"&&x.cachaco_id===c.id).sort(suDesc);
+    out.push(h("div",{class:"su-card"},h("div",{class:"su-l1"},h("b",{},c.identificacao),h("span",{class:"d"},suBlocoNome(suBlocoDoRep(c.id))+(c.raca?" · "+c.raca:"")),c.identificacao.toLowerCase()!=="cachaço"?h("span",{class:"selo hist"},"Cachaço"):null,suAcoes(D.admin?suBtnEditarRep(c):null)),
+      h("div",{class:"su-st"},cobs.length?cobs.length+(cobs.length>1?" coberturas":" cobertura")+" · última em "+dmy(cobs[0].data)+" ("+(suRep(cobs[0].matriz_id)?.identificacao||"—")+")":"Sem cobertura registrada")));});
+  out.push(h("div",{class:"note"},"Gestação de "+G+" dias e desmame aos "+W+" dias (Premissas)."));
+  out.push(suFormRepro());
+  return out;
+}
+function suLinhaRepro(e){
+  const det=e.tipo==="cobertura"?(e.cachaco_id?suRep(e.cachaco_id)?.identificacao:null)||e.metodo:
+    e.tipo==="diagnóstico"?e.resultado:
+    e.tipo==="parto"?[(e.vivos_f||0)+(e.vivos_m||0)+" vivos ("+(e.vivos_f||0)+" F · "+(e.vivos_m||0)+" M)",e.natimortos?e.natimortos+" natimortos":null,e.mumificados?e.mumificados+" mumificados":null].filter(Boolean).join(" · "):
+    e.tipo==="desmame"?[e.desmamados!=null?e.desmamados+" desmamados":null,e.peso_medio_kg?nf(e.peso_medio_kg,1)+" kg/cab":null].filter(Boolean).join(" · "):null;
+  return h("div",{class:"ev su-ev"+(e.status==="cancelado"?" su-canc":"")},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(e.data).slice(0,5)+" · "),h("b",{},cap(e.tipo)),suSeloSt(e.status),suAcoes(suBtnCancelar("suinos_reproducao",e))),
+    det?h("div",{},det):null,e.obs?h("div",{class:"d"},e.obs):null);
+}
+function suBtnEditarRep(r){
+  const b=h("button",{class:"btn sm su-ed",type:"button"},"Editar");
+  b.addEventListener("click",()=>{const card=b.closest(".su-card");if(card.querySelector(".su-edf"))return;
+    const id=h("input",{type:"text",value:r.identificacao,placeholder:"identificação"}),ra=h("input",{type:"text",value:r.raca||"",placeholder:"raça / cruzamento"});
+    const na=h("input",{type:"date",value:r.nascimento||""}),ob=h("input",{type:"text",value:r.obs||"",placeholder:"observação"});
+    const ok=h("button",{class:"btn pri sm",type:"button"},"Gravar");
+    ok.addEventListener("click",()=>{if(!id.value.trim())return suErro(ok,"Informe a identificação.");
+      if(su().rep.some(x=>x.id!==r.id&&x.identificacao.toLowerCase()===id.value.trim().toLowerCase()))return suErro(ok,"Já existe um reprodutor com essa identificação.");
+      suGravar(ok,()=>suUpd("suinos_reprodutores",{identificacao:id.value.trim(),raca:ra.value.trim()||null,nascimento:na.value||null,obs:ob.value.trim()||null},"id",r.id));});
+    card.append(h("div",{class:"regform su-edf"},h("div",{class:"grid2"},id,ra),h("div",{class:"grid2"},na,ob),ok));});
+  return b;
+}
+function suFormRepro(){
+  const hoje=hojeIso();const mats=suAtivos("matriz"),cach=suAtivos("cachaço");
+  const matriz=h("select",{},mats.map(m=>h("option",{value:m.id},m.identificacao+" · "+suBlocoNome(suBlocoDoRep(m.id)))));
+  const tipo=h("select",{},["cobertura","diagnóstico","parto","desmame","aborto","retorno ao cio"].map(t=>h("option",{value:t},cap(t))));
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const macho=h("select",{},[...cach.map(c=>h("option",{value:c.id},"Monta natural · "+c.identificacao)),h("option",{value:"ia"},"Inseminação artificial")]);
+  const diag=h("select",{},[["positivo","Diagnóstico positivo (prenhe)"],["negativo","Diagnóstico negativo (vazia)"]].map(([v,l])=>h("option",{value:v},l)));
+  const vf=h("input",{inputmode:"numeric",placeholder:"nascidos vivos — fêmeas"}),vm=h("input",{inputmode:"numeric",placeholder:"nascidos vivos — machos"});
+  const nat=h("input",{inputmode:"numeric",placeholder:"natimortos"}),mum=h("input",{inputmode:"numeric",placeholder:"mumificados"});
+  const lancar=h("input",{type:"checkbox",id:"su-lancar"});lancar.checked=true;
+  const rLancar=h("label",{class:"su-chk",for:"su-lancar"},lancar,h("span",{},"Lançar os nascidos vivos no plantel (desmarque se os leitões já estão contados)"));
+  const bLeit=h("select",{},su().blocos.filter(b=>b.ativo!==false).map(b=>h("option",{value:b.id},"Leitões para o "+b.nome)));
+  const bMat=h("select",{},su().blocos.filter(b=>b.ativo!==false).map(b=>h("option",{value:b.id},"Matriz para o "+b.nome)));
+  const pm=h("input",{inputmode:"decimal",placeholder:"peso médio no desmame (kg/cab)"});
+  const met=h("select",{},[["balança","Pesados na balança"],["fita torácica","Fita torácica"],["informado","Peso informado"]].map(([v,l])=>h("option",{value:v},l)));
+  const info=h("div",{class:"note"});
+  const obs=h("input",{type:"text",placeholder:"observação"});
+  const rCob=h("div",{},macho),rDiag=h("div",{},diag),rParto=h("div",{class:"grid2"},vf,vm),rParto2=h("div",{class:"grid2"},nat,mum);
+  const rDes=h("div",{class:"grid2"},bLeit,bMat),rDes2=h("div",{class:"grid2"},pm,met);
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar");
+  const lactentes=()=>{const b=suBlocoDoRep(matriz.value);return suGrupos().filter(g=>g.bloco_id===b&&g.categoria==="leitões lactentes");};
+  function ajustar(){const t=tipo.value;rCob.hidden=t!=="cobertura";rDiag.hidden=t!=="diagnóstico";rParto.hidden=rParto2.hidden=rLancar.hidden=t!=="parto";
+    rDes.hidden=rDes2.hidden=t!=="desmame";info.hidden=t!=="desmame";
+    if(t==="desmame"){const b=suBlocoDoRep(matriz.value);bLeit.value=b||bLeit.value;bMat.value=b||bMat.value;const lt=lactentes();const n=lt.reduce((s,g)=>s+g.cab,0);
+      info.textContent=n?"Desmame dos "+n+" leitões lactentes do "+suBlocoNome(b)+" ("+lt.map(g=>g.cab+" "+suSexo(g)).join(" · ")+"): passam para a creche. Para corrigir a contagem, registre antes a morte ou o ajuste no Plantel."
+        :"Não há leitões lactentes no bloco da matriz.";}
+    btn.textContent="Registrar "+t;}
+  [tipo,matriz].forEach(e=>e.addEventListener("change",ajustar));
+  btn.addEventListener("click",()=>{const t=tipo.value,d=data.value,mid=matriz.value;
+    if(!mid)return suErro(btn,"Não há matriz ativa.");if(!d||d>hoje)return suErro(btn,"Data inválida (não pode ser futura).");
+    const bm=suBlocoDoRep(mid);const base={matriz_id:mid,tipo:t,data:d,bloco_id:bm,obs:obs.value||null,autor_email:D.email};
+    if(t==="cobertura")return suGravar(btn,()=>suIns("suinos_reproducao",{...base,cachaco_id:macho.value==="ia"?null:macho.value,metodo:macho.value==="ia"?"inseminação":"monta natural"}));
+    if(t==="diagnóstico")return suGravar(btn,()=>suIns("suinos_reproducao",{...base,resultado:diag.value}));
+    if(t==="parto"){const f=suNum(vf.value)||0,m=suNum(vm.value)||0;if(f+m<1&&!(suNum(nat.value)||suNum(mum.value)))return suErro(btn,"Informe os nascidos.");
+      const par=suUuid();const mov=[];
+      if(lancar.checked&&bm){if(f)mov.push({data:d,tipo:"nascimento",bloco_id:bm,categoria:"leitões lactentes",sexo:"F",condicao:"—",cabecas:f,par_id:par,origem_tipo:"parto",autor_email:D.email});
+        if(m)mov.push({data:d,tipo:"nascimento",bloco_id:bm,categoria:"leitões lactentes",sexo:"M",condicao:"inteiro",cabecas:m,par_id:par,origem_tipo:"parto",autor_email:D.email});}
+      return suGravar(btn,async()=>{await suIns("suinos_reproducao",{...base,vivos_f:f,vivos_m:m,natimortos:suNum(nat.value),mumificados:suNum(mum.value),par_id:mov.length?par:null});await suIns("suinos_movimentos",mov);});}
+    if(t==="desmame"){const lt=lactentes();const n=lt.reduce((s,g)=>s+g.cab,0);const par=suUuid();const mov=[],pes=[];
+      for(const g of lt){const dest={...g,categoria:"creche",bloco_id:bLeit.value};mov.push(...suPar(g,dest,g.cab,d,g.bloco_id===bLeit.value?"reclassificação":"transferência",par,{origem_tipo:"desmame"}));
+        const pk=suNumDec(pm.value);
+        const ps=pk?suPesoNovo(dest,g.cab,pk,met.value,d,par,"Peso no desmame"):suPesoLevado(g,dest,g.cab,d,par);if(ps)pes.push(ps);}
+      if(bMat.value!==bm&&bm){const gm=suGrupos().find(g=>g.reprodutor_id===mid);if(gm)mov.push(...suPar(gm,{...gm,bloco_id:bMat.value},1,d,"transferência",par,{origem_tipo:"desmame"}));}
+      return suGravar(btn,async()=>{await suIns("suinos_reproducao",{...base,desmamados:n,peso_medio_kg:suNumDec(pm.value),par_id:mov.length?par:null});await suIns("suinos_movimentos",mov);await suIns("suinos_pesagens",pes);});}
+    return suGravar(btn,()=>suIns("suinos_reproducao",base));
+  });
+  const f=h("div",{class:"regform"},h("div",{class:"badge"},"Registrar evento reprodutivo"),h("div",{class:"grid2"},matriz,tipo),data,rCob,rDiag,rParto,rParto2,rLancar,rDes,rDes2,info,obs,btn);
+  ajustar();return f;
+}
+
+/* ---- aba Pesagens ---- */
+function suAbaPesagens(){
+  const out=[];const gs=suGrupos();let estimado=false;
+  const linhas=gs.map(g=>{const p=suPeso(g);const est=p&&p.metodo==="estimativa por foto";if(est)estimado=true;const gmd=suGmd(g);
+    const sub=g.reprodutor_id?(suRotCat(g).toLowerCase().includes(g.categoria)?"":g.categoria):suSexo(g)+(g.destino?" · "+g.destino:"");
+    return h("tr",{},h("td",{},suBlocoNome(g.bloco_id).replace("Bloco ","B")+" · "+suRotCat(g),sub?h("small",{class:"su-sub"},sub):null),
+      h("td",{class:"n r"},String(g.cab)),h("td",{class:"n r"+(est?" su-est":"")},p?nf(p.peso_medio_kg,0):"—",p&&p.peso_max_kg!=null&&p.peso_min_kg!=null&&Number(p.peso_max_kg)>Number(p.peso_min_kg)?h("small",{class:"su-sub"},nf(p.peso_min_kg,0)+"–"+nf(p.peso_max_kg,0)):null),
+      h("td",{class:"n r"},p?dmy(p.data).slice(0,5):"—",gmd!=null?h("small",{class:"su-sub"},"GMD "+nf(gmd*1000,0)+" g"):null));});
+  out.push(h("div",{class:"badge"},"Peso atual por grupo",h("span",{class:"selo vig"},"Posição em "+dmy(hojeIso()))),
+    h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Grupo"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"kg/cab"),h("th",{class:"r"},"Data"))),h("tbody",{},...linhas)))));
+  if(estimado)out.push(h("div",{class:"note"},"Peso em cinza: estimativa por foto (±25%), até a pesagem."));
+  const inv=new Set(su().mov.filter(m=>m.tipo==="inventário").map(m=>m.data+"|"+suKeyP(m)));
+  const hist=[...su().pes].filter(p=>!p.par_id&&!inv.has(p.data+"|"+suKeyP(p))).sort(suDesc).slice(0,8);
+  if(hist.length)out.push(h("div",{class:"badge"},"Pesagens registradas"),h("div",{},...hist.map(p=>h("div",{class:"ev su-ev"+(p.status==="cancelado"?" su-canc":"")},
+    h("div",{class:"su-l1"},h("span",{class:"d"},dmy(p.data).slice(0,5)+" · "),h("b",{},p.reprodutor_id?(suRep(p.reprodutor_id)?.identificacao||"—"):suBlocoNome(p.bloco_id).replace("Bloco ","B")+" · "+cap(p.categoria)),suSeloSt(p.status),suAcoes(suBtnCancelar("suinos_pesagens",p))),
+    h("div",{},(p.reprodutor_id?"":suSexo(p)+" · ")+nf(p.peso_medio_kg,1)+" kg/cab"+(p.cabecas?" · "+p.cabecas+" cab":"")+" · "+p.metodo+(p.perimetro_cm?" ("+nf(p.perimetro_cm,0)+" × "+nf(p.comprimento_cm,0)+" cm)":"")),
+    p.obs&&p.metodo!=="estimativa por foto"?h("div",{class:"d"},p.obs):null))));
+  out.push(suFormPesagem());
+  return out;
+}
+function suFormPesagem(){
+  const hoje=hojeIso();const gs=suGrupos();
+  const grupo=h("select",{},gs.map((g,i)=>h("option",{value:String(i)},suRotGrupo(g)+" · "+g.cab+" cab")));
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const met=h("select",{},[["balança","Balança"],["fita torácica","Fita torácica"],["informado","Peso informado"]].map(([v,l])=>h("option",{value:v},l)));
+  const cab=h("input",{inputmode:"numeric",placeholder:"cabeças pesadas"});
+  const peso=h("input",{inputmode:"decimal",placeholder:"peso médio (kg/cab)"});
+  const per=h("input",{inputmode:"decimal",placeholder:"perímetro torácico (cm)"}),comp=h("input",{inputmode:"decimal",placeholder:"comprimento (cm)"});
+  const calc=h("div",{class:"note"});const obs=h("input",{type:"text",placeholder:"observação"});
+  const rFita=h("div",{class:"grid2"},per,comp),rPeso=h("div",{class:"grid2"},peso,cab);
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar pesagem");
+  const grp=()=>gs[+grupo.value];
+  function ajustar(){const fita=met.value==="fita torácica";rFita.hidden=!fita;peso.hidden=fita;calc.hidden=!fita;
+    const g=grp();if(g){cab.value=String(g.cab);cab.disabled=!!g.reprodutor_id;}
+    const v=suFita(suNumDec(per.value),suNumDec(comp.value));
+    calc.textContent=v?"Peso estimado pela fita: "+nf(v,1)+" kg/cab (perímetro² × comprimento ÷ 14.400).":"Peso (kg) ≈ perímetro² × comprimento ÷ 14.400 — perímetro logo atrás das patas dianteiras; comprimento da nuca à base da cauda (suínos acima de ~20 kg).";}
+  [grupo,met].forEach(e=>e.addEventListener("change",ajustar));[per,comp].forEach(e=>e.addEventListener("input",ajustar));
+  btn.addEventListener("click",()=>{const g=grp(),d=data.value;if(!g)return suErro(btn,"Escolha o grupo.");if(!d||d>hoje)return suErro(btn,"Data inválida (não pode ser futura).");
+    const fita=met.value==="fita torácica";const pc=suNumDec(per.value),cc=suNumDec(comp.value);
+    const v=fita?suFita(pc,cc):suNumDec(peso.value);if(!v||v<=0)return suErro(btn,fita?"Informe perímetro e comprimento.":"Informe o peso médio.");
+    const n=suNum(cab.value);if(!n||n<1||n>g.cab)return suErro(btn,"Cabeças pesadas: de 1 a "+g.cab+".");
+    suGravar(btn,()=>suIns("suinos_pesagens",{data:d,bloco_id:g.bloco_id,categoria:g.categoria,sexo:g.sexo,condicao:g.condicao,reprodutor_id:g.reprodutor_id,cabecas:n,metodo:met.value,
+      peso_medio_kg:Math.round(v*10)/10,perimetro_cm:fita?pc:null,comprimento_cm:fita?cc:null,obs:obs.value||null,autor_email:D.email}));});
+  const f=h("div",{class:"regform"},h("div",{class:"badge"},"Registrar pesagem"),grupo,h("div",{class:"grid2"},data,met),rFita,calc,rPeso,obs,btn);
+  ajustar();return f;
+}
+
+/* ---- aba Alimentação ---- */
+function suAbaAlimentacao(){
+  const out=[];const gs=suGrupos();const ini=suSomaDias(hojeIso(),-6);
+  const semReg=[];
+  const linhas=su().blocos.filter(b=>b.ativo!==false).map(b=>{const cab=gs.filter(g=>g.bloco_id===b.id).reduce((s,g)=>s+g.cab,0);
+    const al=su().alim.filter(a=>suOk(a)&&a.bloco_id===b.id);const d7=al.filter(a=>a.data>=ini);if(!d7.length){if(cab)semReg.push(b.numero);return null;}
+    const kg=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);const ult=al.sort(suDesc)[0];
+    return h("tr",{},h("td",{},b.nome,h("small",{class:"su-sub"},cab+" cab")),h("td",{class:"n r"},d7.length?nf(kg,0):"—"),h("td",{class:"n r"},d7.length&&cab?nf(kg/7/cab,2):"—"),
+      h("td",{class:"n r"},ult?dmy(ult.data).slice(0,5):"—"));}).filter(Boolean);
+  out.push(h("div",{class:"badge"},"Fornecimento · últimos 7 dias",h("span",{class:"selo vig"},dmy(ini).slice(0,5)+" a "+dmy(hojeIso()).slice(0,5))));
+  if(linhas.length)out.push(h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Bloco"),h("th",{class:"r"},"kg"),h("th",{class:"r"},"kg/cab/dia"),h("th",{class:"r"},"Último"))),h("tbody",{},...linhas)))));
+  if(semReg.length)out.push(h("div",{class:"note"},"Sem fornecimento registrado nos últimos 7 dias: "+(semReg.length>1?"blocos ":"bloco ")+semReg.join(", ").replace(/, (\d+)$/," e $1")+"."));
+  const hist=[...su().alim].sort(suDesc).slice(0,10);
+  if(hist.length)out.push(h("div",{class:"badge"},"Fornecimentos registrados"),h("div",{},...hist.map(a=>h("div",{class:"ev su-ev"+(a.status==="cancelado"?" su-canc":"")},
+    h("div",{class:"su-l1"},h("span",{class:"d"},dmy(a.data).slice(0,5)+" · "),h("b",{},suBlocoNome(a.bloco_id)),suSeloSt(a.status),suAcoes(suBtnCancelar("suinos_alimentacao",a))),
+    h("div",{},a.alimento+" · "+nf(a.quantidade_kg,1)+" kg"),a.obs?h("div",{class:"d"},a.obs):null))));
+  out.push(suFormAlim());
+  return out;
+}
+function suFormAlim(){
+  const hoje=hojeIso();
+  const bloco=h("select",{},su().blocos.filter(b=>b.ativo!==false).map(b=>h("option",{value:b.id},b.nome)));
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const lista=h("datalist",{id:"su-alimentos"},SU_ALIMENTOS.map(a=>h("option",{value:a})));
+  const alim=h("input",{type:"text",list:"su-alimentos",placeholder:"alimento (ex.: Ração crescimento, Milho)"});
+  const kg=h("input",{inputmode:"decimal",placeholder:"quantidade (kg)"});const obs=h("input",{type:"text",placeholder:"observação"});
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar fornecimento");
+  btn.addEventListener("click",()=>{const d=data.value,q=suNumDec(kg.value);if(!d||d>hoje)return suErro(btn,"Data inválida (não pode ser futura).");
+    if(!alim.value.trim())return suErro(btn,"Informe o alimento.");if(!q||q<=0)return suErro(btn,"Informe a quantidade em kg.");
+    suGravar(btn,()=>suIns("suinos_alimentacao",{data:d,bloco_id:bloco.value,alimento:alim.value.trim(),quantidade_kg:q,obs:obs.value||null,autor_email:D.email}));});
+  return h("div",{class:"regform"},h("div",{class:"badge"},"Registrar fornecimento"),h("div",{class:"grid2"},bloco,data),lista,alim,h("div",{class:"grid2"},kg,obs),btn);
+}
+
+/* ---- aba Sanidade ---- */
+function suAbaSanidade(){
+  const out=[];
+  const prog=su().san.filter(s=>s.status==="programado").sort(suAsc);
+  if(prog.length)out.push(h("div",{class:"badge"},"Programados"),h("div",{},...prog.map(s=>suLinhaSan(s,true))));
+  const real=su().san.filter(s=>s.status!=="programado").sort(suDesc).slice(0,10);
+  if(real.length)out.push(h("div",{class:"badge"},"Realizados"),h("div",{},...real.map(s=>suLinhaSan(s,false))));
+  if(!prog.length&&!real.length)out.push(h("div",{class:"note"},"Sem manejo sanitário registrado."));
+  out.push(suFormSan());
+  return out;
+}
+function suLinhaSan(s,prog){
+  const feito=prog?h("button",{class:"btn sm",type:"button"},"Marcar realizado"):null;
+  if(feito)feito.addEventListener("click",()=>{const d=hojeIso();
+    if(s.tipo==="castração"){const r=suCastracao(s.bloco_id,s.categoria,s.cabecas,d);if(r.erro)return suErro(feito,r.erro);
+      return suGravar(feito,async()=>{await suUpd("suinos_sanidade",{status:"realizado",data:d,par_id:r.par},"id",s.id);await suIns("suinos_movimentos",r.mov);await suIns("suinos_pesagens",r.pes);});}
+    suGravar(feito,()=>suUpd("suinos_sanidade",{status:"realizado",data:d},"id",s.id));});
+  const canc=suBtnCancelar("suinos_sanidade",s);
+  return h("div",{class:"ev su-ev"+(s.status==="cancelado"?" su-canc":"")},
+    h("div",{class:"su-l1"},h("span",{class:"d"},dmy(s.data).slice(0,5)+" · "),h("b",{},cap(s.tipo)+(s.produto?" — "+s.produto:"")),suSeloSt(s.status==="programado"?null:s.status),prog?null:suAcoes(canc)),
+    h("div",{},suAlvoTxt(s)+(s.dose?" · "+s.dose:"")),s.obs?h("div",{class:"d"},s.obs):null,
+    prog?h("div",{class:"su-acoes su-acoes-l"},feito,canc):null);
+}
+/* castração: inteiros do grupo passam a capados (o peso vai junto) */
+function suCastracao(bloco_id,categoria,cab,d){
+  const g=suGrupos().find(x=>x.bloco_id===bloco_id&&x.categoria===categoria&&x.sexo==="M"&&x.condicao==="inteiro"&&!x.reprodutor_id);
+  if(!g)return {erro:"Não há machos inteiros nesse grupo."};const n=cab&&cab<=g.cab?cab:g.cab;const par=suUuid();
+  const dest={...g,condicao:"capado"};const ps=suPesoLevado(g,dest,n,d,par);
+  return {par,mov:suPar(g,dest,n,d,"reclassificação",par,{origem_tipo:"castração"}),pes:ps?[ps]:[]};
+}
+function suFormSan(){
+  const hoje=hojeIso();const gs=suGrupos();
+  const tipo=h("select",{},["vacina","vermífugo","ferro","castração","medicamento","outro"].map(t=>h("option",{value:t},cap(t))));
+  const data=h("input",{type:"date",value:hoje});
+  const prod=h("input",{type:"text",placeholder:"produto"}),dose=h("input",{type:"text",placeholder:"dose (ex.: 1 mL/cab)"});
+  /* alvo: bloco inteiro, bloco × faixa ou reprodutor */
+  const alvos=[];
+  su().blocos.filter(b=>b.ativo!==false).forEach(b=>{const gb=gs.filter(g=>g.bloco_id===b.id);if(!gb.length)return;
+    alvos.push({bloco_id:b.id,categoria:null,reprodutor_id:null,cab:gb.reduce((s,g)=>s+g.cab,0),rot:b.nome+" — todos"});
+    [...new Set(gb.filter(g=>!g.reprodutor_id).map(g=>g.categoria))].forEach(c=>{const gc=gb.filter(g=>g.categoria===c&&!g.reprodutor_id);
+      if(gc.length&&gb.length>gc.length)alvos.push({bloco_id:b.id,categoria:c,reprodutor_id:null,cab:gc.reduce((s,g)=>s+g.cab,0),rot:b.nome+" · "+cap(c)});});
+    gb.filter(g=>g.reprodutor_id).forEach(g=>alvos.push({bloco_id:b.id,categoria:g.categoria,reprodutor_id:g.reprodutor_id,cab:1,rot:b.nome+" · "+suRotCat(g)}));});
+  const alvo=h("select",{},alvos.map((a,i)=>h("option",{value:String(i)},a.rot+" · "+a.cab+" cab")));
+  const cab=h("input",{inputmode:"numeric",placeholder:"cabeças"});
+  let status="realizado";
+  const chip=(v,l)=>{const id="su-st-"+v;const inp=h("input",{type:"radio",name:"su-st",id});inp.checked=v===status;inp.addEventListener("change",()=>{status=v;ajustar();});return h("label",{class:"chip",for:id},inp,h("span",{},l));};
+  const obs=h("input",{type:"text",placeholder:"observação"});const info=h("div",{class:"note"});
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar");
+  const inteiros=a=>gs.filter(g=>g.bloco_id===a.bloco_id&&(!a.categoria||g.categoria===a.categoria)&&g.sexo==="M"&&g.condicao==="inteiro"&&!g.reprodutor_id).reduce((s,g)=>s+g.cab,0);
+  function ajustar(){const a=alvos[+alvo.value];const cast=tipo.value==="castração";if(a)cab.value=String(cast?inteiros(a):a.cab);data.max=status==="realizado"?hoje:"";
+    info.hidden=!cast;
+    if(cast)info.textContent="Castração realizada: os machos inteiros do grupo passam a capados no plantel.";
+    btn.textContent=status==="programado"?"Programar":"Registrar "+tipo.value;}
+  [tipo,alvo].forEach(e=>e.addEventListener("change",ajustar));
+  btn.addEventListener("click",()=>{const a=alvos[+alvo.value],d=data.value;if(!a)return suErro(btn,"Escolha o alvo.");
+    if(!d||(status==="realizado"&&d>hoje))return suErro(btn,"Data inválida: realizado não pode ser futuro.");
+    const n=suNum(cab.value);if(!n||n<1||n>a.cab)return suErro(btn,"Cabeças: de 1 a "+a.cab+".");
+    const row={data:d,tipo:tipo.value,produto:prod.value||null,dose:dose.value||null,bloco_id:a.bloco_id,categoria:a.categoria,reprodutor_id:a.reprodutor_id,cabecas:n,status,obs:obs.value||null,autor_email:D.email};
+    if(tipo.value==="castração"){if(a.reprodutor_id)return suErro(btn,"Castração é por grupo, não de reprodutor.");
+      const cats=a.categoria?[a.categoria]:[...new Set(gs.filter(g=>g.bloco_id===a.bloco_id&&g.sexo==="M"&&g.condicao==="inteiro"&&!g.reprodutor_id).map(g=>g.categoria))];
+      if(!cats.length)return suErro(btn,"Não há machos inteiros nesse alvo.");
+      if(cats.length>1)return suErro(btn,"Escolha a faixa: há machos inteiros em mais de uma.");
+      row.categoria=cats[0];row.cabecas=Math.min(n,inteiros({bloco_id:a.bloco_id,categoria:cats[0]}));
+      if(status==="realizado"){const r=suCastracao(a.bloco_id,cats[0],row.cabecas,d);if(r.erro)return suErro(btn,r.erro);
+        return suGravar(btn,async()=>{await suIns("suinos_sanidade",{...row,par_id:r.par});await suIns("suinos_movimentos",r.mov);await suIns("suinos_pesagens",r.pes);});}}
+    suGravar(btn,()=>suIns("suinos_sanidade",row));});
+  const f=h("div",{class:"regform"},h("div",{class:"badge"},"Registrar manejo sanitário"),h("div",{class:"chips"},chip("realizado","Realizado"),chip("programado","Programado")),
+    h("div",{class:"grid2"},tipo,data),h("div",{class:"grid2"},prod,dose),alvo,h("div",{class:"grid2"},cab,obs),info,btn);
+  ajustar();return f;
+}
 
 /* ---------- chuvas: pluviômetros Sede 1 e Sede 2 ---------- */
 const pluvios=()=>D.estr.filter(e=>e.tipo==="pluviometro").sort((a,b)=>a.nome<b.nome?-1:1);
