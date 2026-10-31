@@ -1781,17 +1781,19 @@ function suAbaPlantel(){
       linhas.push(h("tr",{},h("td",{},suRotCat(g),suSubCat(g)),
         h("td",{class:"n"},g.sexo,g.condicao&&g.condicao!=="—"&&!g.reprodutor_id?h("small",{class:"su-sub"},g.condicao):null),h("td",{class:"n r"},String(g.cab)),
         h("td",{class:"n r"+(est?" su-est":""),title:p?(p.metodo+" · "+dmy(p.data)):""},p?nf(p.peso_medio_kg,0):"—")));});});
-  out.push(h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Categoria"),h("th",{},"Sexo"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"kg/cab"))),h("tbody",{},...linhas)))));
+  const tabBloco=h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Categoria"),h("th",{},"Sexo"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"kg/cab"))),h("tbody",{},...linhas))));
   const vazios=su().blocos.filter(b=>b.ativo!==false&&!gs.some(g=>g.bloco_id===b.id));
   const notas=[estimado?"Peso em cinza: estimativa por foto (±25%), até a pesagem.":null,vazios.length?"Vazios: "+vazios.map(b=>b.nome).join(", ")+".":null].filter(Boolean);
-  if(notas.length)out.push(h("div",{class:"note"},notas.join(" ")));
   /* por faixa */
   const fx=SU_CATS.map(c=>{const gc=gs.filter(g=>g.categoria===c);if(!gc.length)return null;
     const cab=gc.reduce((s,g)=>s+g.cab,0);let kg=0,cp=0;gc.forEach(g=>{const p=suPeso(g);if(p){kg+=g.cab*Number(p.peso_medio_kg);cp+=g.cab;}});
     return h("tr",{},h("td",{},cap(c)),h("td",{class:"n r"},String(cab)),h("td",{class:"n r"},String(gc.filter(g=>g.sexo==="F").reduce((s,g)=>s+g.cab,0))),
       h("td",{class:"n r"},String(gc.filter(g=>g.sexo==="M").reduce((s,g)=>s+g.cab,0))),h("td",{class:"n r"},cp?nf(kg/cp,0):"—"));}).filter(Boolean);
+  /* ordem (André, 31/10/2026): primeiro o resumo por faixa, depois o detalhado por bloco */
   out.push(h("div",{class:"badge"},"Por faixa"),h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},
     h("thead",{},h("tr",{},h("th",{},"Faixa"),h("th",{class:"r"},"Cab."),h("th",{class:"r"},"F"),h("th",{class:"r"},"M"),h("th",{class:"r"},"kg/cab"))),h("tbody",{},...fx)))));
+  out.push(h("div",{class:"badge"},"Por bloco"),tabBloco);
+  if(notas.length)out.push(h("div",{class:"note"},notas.join(" ")));
   /* movimentos recentes (pares juntos numa linha) */
   const vistos=new Set(),evs=[];
   for(const m of [...su().mov].sort(suDesc)){const k=m.par_id||(m.tipo==="inventário"?"inv|"+m.data:null);
