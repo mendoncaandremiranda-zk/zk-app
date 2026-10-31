@@ -166,6 +166,8 @@ details.consulta .c-corpo{padding:2px 0 12px;display:grid;gap:10px}
 .map text.sm{font-family:var(--f-mono);font-weight:600;font-size:11px;fill:var(--accent)}
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);margin-top:6px}
 .legend i{display:inline-block;width:14px;height:10px;border:1px solid var(--ink);vertical-align:-1px;margin-right:4px}
+.legend button.leg{all:unset;display:inline-flex;align-items:center;cursor:pointer;color:var(--muted);font:inherit;border-radius:4px;padding:2px 4px;margin:-2px -4px}
+.legend button.leg:hover,.legend button.leg:focus-visible{color:var(--ink);background:var(--soft)}
 .panel{border:1px solid var(--line);border-radius:8px;padding:14px;background:var(--bg);display:grid;gap:10px;align-content:start}
 .panel h3{font-family:var(--f-display);font-stretch:85%;font-size:22px;margin:0}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px}
@@ -234,6 +236,7 @@ td.su-est{color:var(--muted)}
 .mj-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px dashed var(--line);cursor:pointer}
 .mj-row:first-child{border-top:0} .mj-row.est{cursor:default}
 .mj-nome{font-weight:600;font-size:14.5px}
+.mj-sub{font-family:var(--f-mono);font-size:11.5px;font-weight:400;color:var(--muted)}
 .mj-ult{grid-column:1/-1;font-size:13px;color:var(--muted)}
 .mj-ult b{font-family:var(--f-mono);font-weight:600;color:var(--ink);font-size:12.5px}
 .mj-st{grid-column:2;grid-row:1;font-family:var(--f-mono);font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
@@ -910,6 +913,8 @@ function ativarZoomMapa(cont,svg){
 }
 
 /* ---------- vista: mapa ---------- */
+/* item da legenda clicável: abre o ambiente do tipo (lista ou ficha) */
+const legBtn=(chave,sw,rot)=>h("button",{class:"leg",type:"button",title:"Abrir "+(LEG_ROT[chave]||rot).toLowerCase(),onclick:()=>legendaAbrir(chave)},sw,rot);
 function viewMapa(main){
   const svg=s_("svg",{viewBox:`0 0 ${MAP.w} ${MAP.h}`,role:"group","aria-label":"Mapa da Chácara ZK"});
   const defs=s_("defs");const pat=s_("pattern",{id:"hatch",width:"8",height:"8",patternUnits:"userSpaceOnUse",patternTransform:"rotate(45)"});
@@ -935,11 +940,11 @@ function viewMapa(main){
   ativarZoomMapa(mapDiv,svg);
   main.replaceChildren(h("section",{class:"card"},h("div",{class:"mapwrap"},
     h("div",{},mapDiv,
-      h("div",{class:"legend"},h("span",{},h("i",{style:"background:color-mix(in srgb,var(--accent) 22%,var(--surface))"}),"Pasto ocupado"),h("span",{},h("i",{style:"background:var(--surface)"}),"Pasto vazio"),h("span",{},h("i",{style:"background:repeating-linear-gradient(45deg,var(--line) 0 1px,transparent 1px 5px)"}),"Remanescente"),
-        h("span",{},legSwatch("ponto_agua"),"Ponto de Água"),h("span",{},legSwatch("cocho"),"Cocho"),
-        h("span",{},legSwatch("estoque"),"Barracão de Estoque"),h("span",{},legSwatch("maquinas"),"Barracão de Máquinas"),
-        h("span",{},legSwatch("aves"),"Galinheiro"),h("span",{},legSwatch("suinos"),"Chiqueiro"),
-        h("span",{},legSwatch("pluviometro"),"Pluviômetro"))),
+      h("div",{class:"legend"},legBtn("ocupado",h("i",{style:"background:color-mix(in srgb,var(--accent) 22%,var(--surface))"}),"Pasto ocupado"),legBtn("vazio",h("i",{style:"background:var(--surface)"}),"Pasto vazio"),h("span",{},h("i",{style:"background:repeating-linear-gradient(45deg,var(--line) 0 1px,transparent 1px 5px)"}),"Remanescente"),
+        legBtn("ponto_agua",legSwatch("ponto_agua"),"Ponto de Água"),legBtn("cocho",legSwatch("cocho"),"Cocho"),
+        legBtn("estoque",legSwatch("estoque"),"Barracão de Estoque"),legBtn("maquinas",legSwatch("maquinas"),"Barracão de Máquinas"),
+        legBtn("aves",legSwatch("aves"),"Galinheiro"),legBtn("suinos",legSwatch("suinos"),"Chiqueiro"),
+        legBtn("pluviometro",legSwatch("pluviometro"),"Pluviômetro"))),
     h("div",{class:"panel",id:"panel"}))));
   if(selEstrId)selEstrutura(selEstrId);else if(selN)selPasto(selN);else if(selLoteId)selLote(selLoteId);else clearSel();
 }
@@ -1479,6 +1484,72 @@ function mjBlocoRebanho(lids){
   if(mortes.length)kv.push(h("dt",{},"Mortes"),h("dd",{},mc+" cab · até "+dmy([...mortes].sort((a,b)=>a.data<b.data?1:-1)[0].data)+(mortes.some(e=>e.lote_id==null)?" · rebanho todo":"")));
   evs.filter(e=>e.tipo!=="morte").sort((a,b)=>a.data<b.data?1:-1).forEach(e=>kv.push(h("dt",{},mjTipoRot(e.tipo)),h("dd",{},dmy(e.data)+(e.cabecas?" · "+e.cabecas+" cab":"")+(e.status==="programado"?" · prevista":"")+(e.obs?" · "+e.obs:""),e.status==="programado"?h("span",{class:"selo prog"},"Programado"):null)));
   return h("div",{},h("div",{class:"badge"},"Rebanho"),h("dl",{class:"kv"},...kv));
+}
+
+/* ---------- pontos de água e cochos: uma linha por ponto (nome · situação · detalhe), usada nas Consultas e na legenda ---------- */
+const pastosDaEstr=e=>D.eplinks.filter(l=>l.estrutura_id===e.id).map(l=>D.pastos.find(p=>p.id===l.pasto_id)).filter(Boolean);
+const cabNosPastos=ps=>ocupVig().filter(m=>ps.some(p=>p.id===m.pasto_id)).reduce((s,m)=>s+m.cabecas,0);
+/* toque abre a ficha da estrutura (no mapa) */
+function linhaEstrClicavel(row,e){row.classList.remove("est");row.setAttribute("role","button");row.setAttribute("tabindex","0");row.title="Abrir a ficha";
+  const abrir=()=>{const id=mapIdByNome(e.nome);if(!id)return;if(VIEW!=="mapa"){VIEW="mapa";rerender();}selEstrutura(id);};
+  row.addEventListener("click",abrir);row.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();abrir();}});return row;}
+function linhasPontosAgua(){
+  return D.estr.filter(e=>e.tipo==="ponto_agua").map(e=>{
+    const ins=D.insp.filter(i=>i.estrutura_id===e.id)[0];
+    const ok=ins?(ins.funcionamento&&ins.limpeza&&ins.qualidade):null;
+    const falhas=ins?[["funcionamento","funcionamento"],["limpeza","limpeza"],["qualidade","qualidade da água"]].filter(([k])=>!ins[k]).map(([,r])=>r):[];
+    const ps=pastosDaEstr(e),cab=cabNosPastos(ps);
+    return linhaEstrClicavel(h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
+      h("div",{class:"mj-st"},ins?h("span",{class:"selo "+(ok?"vig":"bad")},ok?"OK":"Pendência"):h("span",{class:"selo hist"},"Sem inspeção")),
+      h("div",{class:"mj-ult"},...(ins?[h("b",{},dm(ins.data))," · "+mjQuando(ins.data)+(falhas.length?" · pendência: "+falhas.join(", "):"")+(ins.obs?" · "+ins.obs:"")]:["nenhuma inspeção registrada"])),
+      ps.length?h("div",{class:"mj-ult"},ps.map(p=>p.nome).join(", ")+(cab?" · "+cab+" cab":"")):null),e);});
+}
+function linhasCochos(){
+  return D.estr.filter(e=>e.tipo==="cocho").map(e=>{
+    const ab=D.abast.filter(a=>a.estrutura_id===e.id)[0];
+    const ps=pastosDaEstr(e),cab=cabNosPastos(ps);
+    const d7=D.abast.filter(a=>a.estrutura_id===e.id&&a.quantidade_kg&&diasDesde(a.data)<7);
+    const kg7=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
+    return linhaEstrClicavel(h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
+      h("div",{class:"mj-st"},ab?mjQuando(ab.data):h("span",{class:"selo hist"},"Sem abastecimento")),
+      h("div",{class:"mj-ult"},...(ab?[h("b",{},dm(ab.data))," · "+ab.alimento+(ab.quantidade_kg?" · "+nf(ab.quantidade_kg,0)+" kg":"")+(ab.obs?" · "+ab.obs:"")]:["nenhum abastecimento registrado"])),
+      h("div",{class:"mj-ult"},[ps.length?ps.map(p=>p.nome).join(", ")+(cab?" · "+cab+" cab":""):null,d7.length?"7 dias: "+nf(kg7,0)+" kg"+(cab?" · "+nf(kg7/7/cab,2)+" kg/cab/dia":""):null].filter(Boolean).join(" · "))),e);});
+}
+/* pastos por estado (legenda): ocupados e vazios, toque abre a ficha do pasto */
+function linhasPastos(estado){
+  const vig=ocupVig();
+  return D.pastos.filter(p=>(vig.some(m=>m.pasto_id===p.id))===(estado==="ocupado")).map(p=>{
+    const pg=D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27");const cvs=cultivaresDe(p.id).join(" + ")||pg?.cultivar||"";
+    let st,ult;
+    if(estado==="ocupado"){const oc=vig.filter(m=>m.pasto_id===p.id);const cab=oc.reduce((s,m)=>s+m.cabecas,0);const ent=oc.map(m=>m.entrada).sort()[0];
+      st=h("div",{class:"mj-st"},nDias(diasDesde(ent)));
+      ult=h("div",{class:"mj-ult"},oc.map(m=>lote(m.lote_id)+" · "+m.cabecas+" cab").join(" + ")+" · desde "+dm(ent)+(p.area_oficial_ha?" · "+nf(cab/p.area_oficial_ha,1)+" cab/ha":""));}
+    else{const saidas=D.mov.filter(m=>m.pasto_id===p.id&&m.saida).map(m=>m.saida).sort();const ult_=saidas[saidas.length-1];
+      const meta=premNum("dias_descanso_meta",["pasto:"+p.numero,"cultivar:"+(pg?.cultivar||""),"geral"],null);const desc=ult_?diasDesde(ult_):null;
+      st=h("div",{class:"mj-st "+(desc!=null&&meta!=null&&desc>=meta?"prog":"")},desc!=null?"descanso "+nDias(desc)+(meta!=null?" / "+nf(meta,0):""):"livre");
+      ult=h("div",{class:"mj-ult"},[ult_?"último lote saiu em "+dm(ult_):"sem ocupação anterior",pg?.situacao||null].filter(Boolean).join(" · "));}
+    const row=h("div",{class:"mj-row",role:"button",tabindex:"0",title:"Abrir a ficha"},h("div",{class:"mj-nome"},p.nome,cvs?h("span",{class:"mj-sub"}," · "+cvs):null),st,ult);
+    const abrir=()=>{if(VIEW!=="mapa"){VIEW="mapa";rerender();}selPasto(p.numero,"pasto");};
+    row.addEventListener("click",abrir);row.addEventListener("keydown",ev=>{if(ev.key==="Enter"||ev.key===" "){ev.preventDefault();abrir();}});return row;});
+}
+/* ---------- legenda do mapa: cada item abre o seu ambiente (André, 31/10/2026) ---------- */
+const LEG_ROT={ocupado:"Pastos ocupados",vazio:"Pastos vazios",ponto_agua:"Pontos de água",cocho:"Cochos",estoque:"Barracão de Estoque",maquinas:"Barracão de Máquinas",aves:"Galinheiro",suinos:"Chiqueiro",pluviometro:"Pluviômetros"};
+function legendaAbrir(chave){
+  if(chave==="pluviometro"){VIEW="chuvas";rerender();return;}
+  const pn=document.getElementById("panel");if(!pn)return;
+  let linhas;
+  if(chave==="ocupado"||chave==="vazio")linhas=linhasPastos(chave);
+  else if(chave==="ponto_agua")linhas=linhasPontosAgua();
+  else if(chave==="cocho")linhas=linhasCochos();
+  else{const es=D.estr.filter(e=>e.tipo===chave);
+    if(es.length===1){const id=mapIdByNome(es[0].nome);if(id){selEstrutura(id);return;}}
+    linhas=es.map(e=>linhaEstrClicavel(h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),h("div",{class:"mj-st"},""),e.obs?h("div",{class:"mj-ult"},e.obs):null),e));}
+  selN=null;selEstrId=null;selLoteId=null;if(VIEW!=="chuvas")gpsParar();
+  document.querySelectorAll(".map .pasto,.map .estr").forEach(e=>e.classList.remove("sel"));
+  pn.replaceChildren(h("div",{class:"ficha-top"},h("div",{class:"ph"},h("div",{class:"badge"},"Legenda"),h("button",{class:"btn sm",type:"button",onclick:clearSel},"Fechar")),h("h3",{},LEG_ROT[chave]||chave)),
+    linhas.length?h("div",{class:"mj-quadro"},...linhas):h("div",{class:"note"},"Nada cadastrado."),
+    h("div",{class:"note"},"Toque num item para abrir a ficha."));
+  mostrarFicha(pn);
 }
 
 /* ---------- ficha da estrutura ---------- */
@@ -2875,30 +2946,10 @@ function viewConsultas(main){
   const b6=bloco("5 · Agenda — programados nos próximos 30 dias",mjAgenda(agItens,{vazio:"Nada programado para os próximos 30 dias."}));
 
   /* 7 — conformidade de água */
-  /* pontos de água e cochos: uma linha por ponto (nome · situação à direita · detalhe embaixo), legível no celular */
-  const pastosDe=e=>D.eplinks.filter(l=>l.estrutura_id===e.id).map(l=>D.pastos.find(p=>p.id===l.pasto_id)).filter(Boolean);
-  const cabEm=ps=>vig.filter(m=>ps.some(p=>p.id===m.pasto_id)).reduce((s,m)=>s+m.cabecas,0);
-  const aguaRows=D.estr.filter(e=>e.tipo==="ponto_agua").map(e=>{
-    const ins=D.insp.filter(i=>i.estrutura_id===e.id)[0];
-    const ok=ins?(ins.funcionamento&&ins.limpeza&&ins.qualidade):null;
-    const falhas=ins?[["funcionamento","funcionamento"],["limpeza","limpeza"],["qualidade","qualidade da água"]].filter(([k])=>!ins[k]).map(([,r])=>r):[];
-    const ps=pastosDe(e);
-    return h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
-      h("div",{class:"mj-st"},ins?h("span",{class:"selo "+(ok?"vig":"bad")},ok?"OK":"Pendência"):h("span",{class:"selo hist"},"Sem inspeção")),
-      h("div",{class:"mj-ult"},...(ins?[h("b",{},dm(ins.data))," · "+mjQuando(ins.data)+(falhas.length?" · pendência: "+falhas.join(", "):"")+(ins.obs?" · "+ins.obs:"")]:["nenhuma inspeção registrada"])),
-      ps.length?h("div",{class:"mj-ult"},ps.map(p=>p.nome).join(", ")+(cabEm(ps)?" · "+cabEm(ps)+" cab":"")):null);});
+  const aguaRows=linhasPontosAgua(),cochoRows=linhasCochos();
   const b7=bloco("1 · Pontos de água — conformidade",aguaRows.length?h("div",{class:"mj-quadro"},...aguaRows):h("div",{class:"note"},"Sem pontos de água cadastrados."));
 
   /* 2 — pontos de cocho: último abastecimento e consumo dos últimos 7 dias por cabeça do lote no pasto vinculado */
-  const cochoRows=D.estr.filter(e=>e.tipo==="cocho").map(e=>{
-    const ab=D.abast.filter(a=>a.estrutura_id===e.id)[0];
-    const ps=pastosDe(e),cab=cabEm(ps);
-    const d7=D.abast.filter(a=>a.estrutura_id===e.id&&a.quantidade_kg&&diasDesde(a.data)<7);
-    const kg7=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
-    return h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
-      h("div",{class:"mj-st"},ab?mjQuando(ab.data):h("span",{class:"selo hist"},"Sem abastecimento")),
-      h("div",{class:"mj-ult"},...(ab?[h("b",{},dm(ab.data))," · "+ab.alimento+(ab.quantidade_kg?" · "+nf(ab.quantidade_kg,0)+" kg":"")+(ab.obs?" · "+ab.obs:"")]:["nenhum abastecimento registrado"])),
-      h("div",{class:"mj-ult"},[ps.length?ps.map(p=>p.nome).join(", ")+(cab?" · "+cab+" cab":""):null,d7.length?"7 dias: "+nf(kg7,0)+" kg"+(cab?" · "+nf(kg7/7/cab,2)+" kg/cab/dia":""):null].filter(Boolean).join(" · ")));});
   const b11=bloco("2 · Pontos de cocho — abastecimento",
     cochoRows.length?h("div",{class:"mj-quadro"},...cochoRows):h("div",{class:"note"},"Sem cochos cadastrados."),
     h("div",{class:"note"},"Consumo por cabeça: ração dos últimos 7 dias dividida pelo lote do pasto vinculado ao cocho."));
