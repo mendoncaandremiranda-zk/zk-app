@@ -232,7 +232,7 @@ td.su-est{color:var(--muted)}
 .mj-det[hidden]{display:none}
 .mj-it .mj-det,.mj-it .mj-prot{grid-column:1/-1}
 .mj-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px dashed var(--line);cursor:pointer}
-.mj-row:first-child{border-top:0}
+.mj-row:first-child{border-top:0} .mj-row.est{cursor:default}
 .mj-nome{font-weight:600;font-size:14.5px}
 .mj-ult{grid-column:1/-1;font-size:13px;color:var(--muted)}
 .mj-ult b{font-family:var(--f-mono);font-weight:600;color:var(--ink);font-size:12.5px}
@@ -2803,7 +2803,7 @@ function viewConsultas(main){
     return h("tr",{},h("td",{},lote(m.lote_id)),h("td",{},p?.nome||"—"),h("td",{class:"n"},String(m.cabecas)),
       h("td",{class:"n"},dmy(m.entrada)),h("td",{class:"n"},String(dias)),
       h("td",{class:"n"},p?nf(m.cabecas/p.area_oficial_ha,1):"—"),h("td",{class:"n"},p?nf(UA(m.cabecas)/p.area_oficial_ha,2):"—"));});
-  const b1=bloco("1 · Posição do rebanho agora",
+  const b1=bloco("3 · Posição do rebanho agora",
     tbl(["Lote","Pasto","Cab","Entrada","Dias","cab/ha","UA/ha"],posRows),
     h("div",{class:"note"},"Total: "+cabTot+" cabeças em "+vig.length+" pasto(s)."));
 
@@ -2820,7 +2820,7 @@ function viewConsultas(main){
     const desc=ult?diasDesde(ult):null;
     const status=desc==null?"sem ocupação anterior":meta==null?"sem meta de descanso":(desc>=meta?h("span",{class:"selo vig"},"PRONTO"):"faltam "+nf(meta-desc,0)+" dias");
     return h("tr",{},pcell,h("td",{class:"n"},(desc!=null?String(desc):"—")+" / "+mtxt),h("td",{},status));});
-  const b2=bloco("2 · Prontidão de pastos (descanso × meta)",
+  const b2=bloco("4 · Prontidão de pastos (descanso × meta)",
     tbl(["Pasto","Desc./meta (dias)","Situação"],prontRows),
     h("div",{class:"note"},"Meta vem da premissa \"Dias de descanso da pastagem\" (pasto → cultivar → geral)."));
 
@@ -2857,36 +2857,56 @@ function viewConsultas(main){
       Object.keys(porE).length?h("div",{},h("div",{class:"badge"},"Por cocho"),...Object.entries(porE).map(([n,v])=>h("div",{class:"ev"},n+" · "+nf(v,0)+" kg"))):h("div",{class:"note"},"Sem abastecimentos no período."),
       custoKg==null?h("div",{class:"note"},"Cadastre a premissa \"Custo da ração\" para ver o custo."):null].filter(Boolean));};
   selPer.addEventListener("change",desenhaCons);
-  const b4=bloco("7 · Consumo e custo de suplementação",h("label",{class:"f"},"Período",selPer),cons);
+  const b4=bloco("8 · Consumo e custo de suplementação",h("label",{class:"f"},"Período",selPer),cons);
 
   /* 5 — projeção de venda com sensibilidade */
   const V=VENDA();
   const diasV=Math.ceil((new Date(V.data)-hoje)/86400000);
   const sensRows=[-100,0,100].map(dp=>{const pr=V.alvo+dp;
     return h("tr",dp===0?{style:"font-weight:700"}:{},h("td",{class:"n"},"R$ "+nf(pr,0)+"/cab"+(dp===0?" (alvo)":"")),h("td",{class:"n"},"R$ "+nf(pr*cabTot,0)));});
-  const b5=bloco("8 · Projeção de venda (sensibilidade de preço)",
+  const b5=bloco("9 · Projeção de venda (sensibilidade de preço)",
     h("div",{class:"note"},cabTot+" cab · venda prevista "+dmy(V.data)+" ("+Math.max(0,diasV)+" dias) ",h("span",{class:"selo prog"},"Projeção")),
     tbl(["Preço","Receita"],sensRows));
 
   /* 6 — agenda 30 dias */
   const agItens=[...mjItensTodos(),...mjItensPastagem()].filter(i=>i.status==="programado"&&mjDelta(i.data)<=30);
-  const b6=bloco("3 · Agenda — programados nos próximos 30 dias",mjAgenda(agItens,{vazio:"Nada programado para os próximos 30 dias."}));
+  const b6=bloco("5 · Agenda — programados nos próximos 30 dias",mjAgenda(agItens,{vazio:"Nada programado para os próximos 30 dias."}));
 
   /* 7 — conformidade de água */
+  /* pontos de água e cochos: uma linha por ponto (nome · situação à direita · detalhe embaixo), legível no celular */
+  const pastosDe=e=>D.eplinks.filter(l=>l.estrutura_id===e.id).map(l=>D.pastos.find(p=>p.id===l.pasto_id)).filter(Boolean);
+  const cabEm=ps=>vig.filter(m=>ps.some(p=>p.id===m.pasto_id)).reduce((s,m)=>s+m.cabecas,0);
   const aguaRows=D.estr.filter(e=>e.tipo==="ponto_agua").map(e=>{
     const ins=D.insp.filter(i=>i.estrutura_id===e.id)[0];
-    const dias=ins?Math.round((hoje-new Date(ins.data))/86400000):null;
     const ok=ins?(ins.funcionamento&&ins.limpeza&&ins.qualidade):null;
-    return h("tr",{},h("td",{},e.nome),h("td",{class:"n"},ins?dmy(ins.data):"—"),h("td",{class:"n"},dias!=null?String(dias):"—"),
-      h("td",{},ins?h("span",{class:"selo "+(ok?"vig":"bad")},ok?"OK":"Pendência"):h("span",{class:"selo hist"},"Sem inspeção")));});
-  const b7=bloco("4 · Conformidade dos pontos de água",tbl(["Ponto","Última insp.","Dias","Situação"],aguaRows));
+    const falhas=ins?[["funcionamento","funcionamento"],["limpeza","limpeza"],["qualidade","qualidade da água"]].filter(([k])=>!ins[k]).map(([,r])=>r):[];
+    const ps=pastosDe(e);
+    return h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
+      h("div",{class:"mj-st"},ins?h("span",{class:"selo "+(ok?"vig":"bad")},ok?"OK":"Pendência"):h("span",{class:"selo hist"},"Sem inspeção")),
+      h("div",{class:"mj-ult"},...(ins?[h("b",{},dm(ins.data))," · "+mjQuando(ins.data)+(falhas.length?" · pendência: "+falhas.join(", "):"")+(ins.obs?" · "+ins.obs:"")]:["nenhuma inspeção registrada"])),
+      ps.length?h("div",{class:"mj-ult"},ps.map(p=>p.nome).join(", ")+(cabEm(ps)?" · "+cabEm(ps)+" cab":"")):null);});
+  const b7=bloco("1 · Pontos de água — conformidade",aguaRows.length?h("div",{class:"mj-quadro"},...aguaRows):h("div",{class:"note"},"Sem pontos de água cadastrados."));
+
+  /* 2 — pontos de cocho: último abastecimento e consumo dos últimos 7 dias por cabeça do lote no pasto vinculado */
+  const cochoRows=D.estr.filter(e=>e.tipo==="cocho").map(e=>{
+    const ab=D.abast.filter(a=>a.estrutura_id===e.id)[0];
+    const ps=pastosDe(e),cab=cabEm(ps);
+    const d7=D.abast.filter(a=>a.estrutura_id===e.id&&a.quantidade_kg&&diasDesde(a.data)<7);
+    const kg7=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
+    return h("div",{class:"mj-row est"},h("div",{class:"mj-nome"},e.nome),
+      h("div",{class:"mj-st"},ab?mjQuando(ab.data):h("span",{class:"selo hist"},"Sem abastecimento")),
+      h("div",{class:"mj-ult"},...(ab?[h("b",{},dm(ab.data))," · "+ab.alimento+(ab.quantidade_kg?" · "+nf(ab.quantidade_kg,0)+" kg":"")+(ab.obs?" · "+ab.obs:"")]:["nenhum abastecimento registrado"])),
+      h("div",{class:"mj-ult"},[ps.length?ps.map(p=>p.nome).join(", ")+(cab?" · "+cab+" cab":""):null,d7.length?"7 dias: "+nf(kg7,0)+" kg"+(cab?" · "+nf(kg7/7/cab,2)+" kg/cab/dia":""):null].filter(Boolean).join(" · ")));});
+  const b11=bloco("2 · Pontos de cocho — abastecimento",
+    cochoRows.length?h("div",{class:"mj-quadro"},...cochoRows):h("div",{class:"note"},"Sem cochos cadastrados."),
+    h("div",{class:"note"},"Consumo por cabeça: ração dos últimos 7 dias dividida pelo lote do pasto vinculado ao cocho."));
 
   /* 8 — fertilidade comparativa (0-20 cm) */
   const fert=D.pastos.map(p=>{const sp=D.solo.filter(x=>x.pasto_id===p.id&&x.camada==="0-20");
     if(!sp.length)return null;const g=k=>{const r=sp.find(x=>x.atributo===k);return r?Number(r.valor):null;};
     return {nome:p.nome,v:g("v"),ph:g("ph"),p:g("p_meh"),k:g("k"),mo:g("mo")};}).filter(Boolean)
     .sort((a,b)=>(b.v??-1)-(a.v??-1));
-  const b8=bloco("10 · Fertilidade comparativa (0-20 cm, ordenado por V%)",
+  const b8=bloco("11 · Fertilidade comparativa (0-20 cm, ordenado por V%)",
     fert.length?tbl(["Pasto","V%","pH","P","K","MO"],fert.map(f=>h("tr",{},h("td",{},f.nome),
       ...[f.v,f.ph,f.p,f.k,f.mo].map(v=>h("td",{class:"n"},v!=null?nf(v,v<10?2:0):"—"))))):h("div",{class:"note"},"Sem fertilidade interpolada cadastrada."));
 
@@ -2904,14 +2924,14 @@ function viewConsultas(main){
   const pre=h("pre",{class:"md"},resumoTxt());
   const btnCop=h("button",{class:"btn sm",type:"button",onclick:async()=>{try{await navigator.clipboard.writeText(resumoTxt());btnCop.textContent="Copiado ✓";}catch(e){btnCop.textContent="Selecione e copie do quadro";}}},"Copiar");
   const btnComp=(navigator.share?h("button",{class:"btn sm",type:"button",onclick:()=>navigator.share({text:resumoTxt()}).catch(()=>{})},"Compartilhar"):null);
-  const b9=bloco("5 · Resumo para WhatsApp",
+  const b9=bloco("7 · Resumo para WhatsApp",
     h("div",{class:"note"},"Texto operacional, sem valores financeiros — seguro para encaminhar."),
     pre,h("div",{class:"inline-edit"},btnCop,btnComp));
 
   /* 10 — posição econômica do modelo (ponte modelo→banco; data-base explícita) */
   const pm=posicaoModelo();
   const R0=v=>"R$ "+nf(v,0);
-  const b10=bloco("9 · Posição econômica do modelo",
+  const b10=bloco("10 · Posição econômica do modelo",
     pm?[h("div",{class:"note"},posLinha()+" · "+pm.diasDec+" dias de ciclo desde "+dmy(pm.inicio)+" · "+pm.dias+" dias até a venda ("+dmy(pm.vendaData)+") ",h("span",{class:"selo prog"},"Projeção")," ",posSelo()),
       tbl(["Indicador","Valor"],[
         ["Breakeven por competência",R0(pm.breakeven)+"/cab"],["Breakeven de caixa",R0(pm.breakevenCaixa)+"/cab"],["Preço-alvo",R0(pm.alvo)+"/cab · margem "+R0(pm.margemCab)+"/cab"],
@@ -2929,7 +2949,7 @@ function viewConsultas(main){
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 4px"},"Consultas",h("span",{class:"selo vig"},"Posição vigente")),
     h("p",{class:"note"},"Respostas instantâneas calculadas da posição em "+(D.quando?D.quando.toLocaleDateString("pt-BR")+" "+D.quando.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}):"—")+". Toque numa consulta para abrir."),
     /* ordem pedida pelo André (31/10/2026): operação primeiro; depois manejo, financeiro e solo */
-    grupo("Operação"),b1,b2,b6,b7,b9,grupo("Manejo"),b3,grupo("Financeiro"),b4,b5,b10,grupo("Solo"),b8));
+    grupo("Operação"),b7,b11,b1,b2,b6,b3,b9,grupo("Financeiro"),b4,b5,b10,grupo("Fertilidade"),b8));
   desenhaTL();desenhaCons();
 }
 
