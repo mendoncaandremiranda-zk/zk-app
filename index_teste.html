@@ -237,6 +237,8 @@ td.su-est{color:var(--muted)}
 .mj-row:first-child{border-top:0} .mj-row.est{cursor:default}
 .mj-nome{font-weight:600;font-size:14.5px}
 .mj-sub{font-family:var(--f-mono);font-size:11.5px;font-weight:400;color:var(--muted)}
+.estq-tr{cursor:pointer} .estq-det>td{padding:0 0 8px!important;background:transparent!important}
+.mj-acoes[hidden]{display:none} .mj-hl .mj-acoes{grid-column:2;margin-top:4px}
 .mj-ult{grid-column:1/-1;font-size:13px;color:var(--muted)}
 .mj-ult b{font-family:var(--f-mono);font-weight:600;color:var(--ink);font-size:12.5px}
 .mj-st{grid-column:2;grid-row:1;font-family:var(--f-mono);font-size:12px;color:var(--muted);white-space:nowrap;text-align:right}
@@ -628,7 +630,7 @@ function loginView(msg,erro){
 
 
 /* ---------- dados ---------- */
-const D={tentChuva:[],chuvaFoto:{ativo:false},pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],comp:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
+const D={tentChuva:[],chuvaFoto:{ativo:false},estq:{itens:[],mov:[]},pastos:[],mov:[],pastagem:[],evReb:[],evPas:[],estr:[],lotes:[],eplinks:[],fotos:[],insp:[],abast:[],solo:[],prem:[],rel:[],chuva:[],posicao:null,premFonte:[],ponteExec:[],sims:[],comp:[],quando:null,email:null,papel:"usuario",admin:false,socio:false};
 /* Papéis de acesso (db/14_papeis_acesso.sql): administrador = tudo + premissas; sócio = leitura total,
    Consultas, Simulador e Relatórios; usuário padrão = operação do dia a dia, sem financeiro sensível.
    O banco garante por RLS; aqui só se decide o que aparece na tela. */
@@ -671,8 +673,11 @@ async function carregar(){
     sb.from("leituras_chuva_tentativas").select("id,estrutura_id,data,capturado_em,foto_path,distancia_m,precisao_m,resultado,mm,motivo,leitura_id,autor_email").order("criado_em",{ascending:false}).limit(30).then(({data})=>data||[]).catch(()=>[]),
     chuvaFotoStatus(),
     /* suínos do Chiqueiro (db/28): blocos, reprodutores, movimentos, reprodução, pesagens, alimentação, sanidade — tolerante */
-    carregarSuinos()]);
-  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],tentChuva:r[20],chuvaFoto:r[21],su:r[22],quando:new Date()});
+    carregarSuinos(),
+    /* estoque do Barracão (db/31): itens e movimentos — tolerante (sem as tabelas, vazio) */
+    q("estoque_itens","id,estrutura_id,nome,categoria,tipo,unidade,embalagem,preco_unit_rs,ativo,obs").catch(()=>[]),
+    q("estoque_movimentos","id,item_id,data,tipo,quantidade,embalagens,destino,pasto_id,fornecedor,documento,valor_rs,obs,status,autor_email,criado_em",["data",{ascending:false}]).catch(()=>[])]);
+  Object.assign(D,{pastos:r[0],mov:r[1],pastagem:r[2],evReb:r[3],evPas:r[4],estr:r[5],lotes:r[6],eplinks:r[7],fotos:r[8],insp:r[9],abast:r[10],solo:r[11],prem:r[12],rel:r[13],chuva:r[14],posicao:r[15],premFonte:r[16],ponteExec:r[17],sims:r[18],comp:r[19],tentChuva:r[20],chuvaFoto:r[21],su:r[22],estq:{itens:r[23],mov:r[24]},quando:new Date()});
   aplicarFila();salvarSnapshot();
 }
 /* ---------- posição do modelo (ponte modelo→banco) ----------
@@ -1552,6 +1557,123 @@ function legendaAbrir(chave){
   mostrarFicha(pn);
 }
 
+/* ---------- estoque: Barracão de Estoque (db/31) ----------
+   Pedido do André (31/10/2026): apontar o estoque de defensivos (base 28/09/2026) no Barracão de Estoque e levar ao banco
+   para a gestão de uso. Saldo = último inventário do item + entradas − saídas ± ajustes posteriores (só realizados).
+   Nada se apaga: lançamento errado fica "cancelado". Preços entram quando o André trouxer (coluna preparada). */
+const ESTQ_CATS={defensivo:"Defensivos",fertilizante:"Fertilizantes",adjuvante:"Adjuvantes",inoculante:"Inoculantes",semente:"Sementes",racao:"Ração",mineral:"Mineral",medicamento:"Medicamentos",combustivel:"Combustível",outro:"Outros"};
+const ESTQ_MOV={saida:"Saída",entrada:"Entrada",inventario:"Inventário",ajuste:"Ajuste"};
+const estq=()=>D.estq||{itens:[],mov:[]};
+const estqOrd=(a,b)=>a.data<b.data?-1:a.data>b.data?1:((a.criado_em||"")<(b.criado_em||"")?-1:(a.criado_em||"")>(b.criado_em||"")?1:0);
+const nq=(v,un)=>{const n=Number(v);const s=Number.isInteger(n)?nf(n,0):nf(n,Math.abs(n)<1?2:1);return s+(un?" "+un:"");};
+/* saldo do item: último inventário realizado + movimentos posteriores */
+function estqSaldo(itemId){
+  const movs=estq().mov.filter(m=>m.item_id===itemId&&m.status!=="cancelado").sort(estqOrd);
+  const invs=movs.filter(m=>m.tipo==="inventario");const inv=invs[invs.length-1]||null;
+  let saldo=inv?Number(inv.quantidade):0;
+  movs.filter(m=>m.tipo!=="inventario"&&(!inv||estqOrd(m,inv)>0)).forEach(m=>{const q=Number(m.quantidade);saldo+=m.tipo==="entrada"?q:m.tipo==="saida"?-q:q;});
+  return{saldo,inv,ult:movs[movs.length-1]||null};
+}
+const estqItensDe=eid=>estq().itens.filter(i=>i.estrutura_id===eid&&i.ativo!==false).sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR"));
+let ESTQ_CAT=null;
+function estqLinhaMov(m,it){
+  const un=it?.unidade||"";const sinal=m.tipo==="saida"?"−":m.tipo==="entrada"?"+":m.tipo==="ajuste"&&Number(m.quantidade)<0?"":m.tipo==="ajuste"?"+":"";
+  const det=[m.tipo==="saida"?(m.destino||(m.pasto_id?pastoDe(m.pasto_id)?.nome:null)):null,m.tipo==="entrada"?[m.fornecedor,m.documento,m.valor_rs!=null?"R$ "+nf(m.valor_rs,2):null].filter(Boolean).join(" · "):null,
+    m.embalagens?m.embalagens+" emb.":null,m.obs||null,m.autor_email?m.autor_email.split("@")[0]:null].filter(Boolean).join(" · ");
+  const row=h("div",{class:"mj-hl"+(m.status==="cancelado"?" canc":"")},h("span",{class:"d"},dm(m.data)),
+    h("span",{},h("span",{class:"t"},ESTQ_MOV[m.tipo]||m.tipo)," · "+(it&&!it._so?it.nome+" · ":"")+(m.tipo==="inventario"?"contagem ":sinal)+nq(Math.abs(Number(m.quantidade)),un),
+      m.status==="cancelado"?h("span",{class:"selo hist"},"Anulado"):null,seloFila(m)),det?h("span",{class:"o"},det):null);
+  const a=estqAnular(m);
+  if(a){const ac=h("div",{class:"mj-acoes",hidden:true},a);row.append(ac);row.title="Toque para as ações";
+    row.addEventListener("click",e=>{if(e.target.closest("button"))return;ac.hidden=!ac.hidden;});}
+  return row;
+}
+function estqAnular(m){
+  if(!D.admin||m.status==="cancelado")return null;
+  const x=h("button",{class:"btn sm su-x",type:"button",title:"Anular este movimento (fica no histórico como anulado)"},"Anular");
+  x.addEventListener("click",()=>{const row=x.closest(".mj-hl");if(!row||row.querySelector(".su-conf"))return;
+    const sim=h("button",{class:"btn sm bad",type:"button"},"Anular"),nao=h("button",{class:"btn sm",type:"button"},"Manter");
+    const box=h("div",{class:"su-conf"},h("span",{},"Anular este movimento? Fica no histórico como anulado."),h("span",{class:"su-conf-b"},nao,sim));
+    nao.addEventListener("click",()=>{box.remove();x.hidden=false;});x.hidden=true;row.append(box);
+    sim.addEventListener("click",()=>mjGravar(sim,"Estoque · anulação · "+(estq().itens.find(i=>i.id===m.item_id)?.nome||""),[{op:"update",tabela:"estoque_movimentos",chave:{id:m.id},valores:{status:"cancelado"}}]));});
+  return x;
+}
+/* ficha do Barracão de Estoque */
+function estqFicha(reg,corpo){
+  const itens=estqItensDe(reg.id);
+  const cats=[...new Set(itens.map(i=>i.categoria))];
+  corpo.push(h("div",{class:"badge"},"Estoque",h("span",{class:"selo vig"},"Posição em "+dmy(hojeIso()))));
+  if(!itens.length){corpo.push(h("div",{class:"note"},"Sem itens cadastrados."));corpo.push(estqForm(reg));return;}
+  if(cats.length>1){const chips=h("div",{class:"filtros"});
+    const mk=(rot,on,fn)=>{const c=h("button",{type:"button",class:"chip"+(on?" on":"")},rot);c.addEventListener("click",fn);return c;};
+    chips.append(mk("Todos",!ESTQ_CAT,()=>{ESTQ_CAT=null;selEstrutura(selEstrId);}));
+    cats.sort().forEach(c=>chips.append(mk(ESTQ_CATS[c]||c,ESTQ_CAT===c,()=>{ESTQ_CAT=ESTQ_CAT===c?null:c;selEstrutura(selEstrId);})));corpo.push(chips);}
+  const vis=itens.filter(i=>!ESTQ_CAT||i.categoria===ESTQ_CAT);
+  const comPreco=vis.some(i=>i.preco_unit_rs!=null);let valor=0,aClass=0;
+  const linhas=vis.map(i=>{const s=estqSaldo(i.id);if(i.preco_unit_rs!=null)valor+=s.saldo*Number(i.preco_unit_rs);if(!i.tipo)aClass++;
+    const tr=h("tr",{class:"estq-tr",tabindex:"0",role:"button",title:"Toque para ver os movimentos"},
+      h("td",{},i.nome,seloFila(i),h("small",{class:"su-sub"},[i.tipo||(i.categoria!=="defensivo"?ESTQ_CATS[i.categoria]:"a classificar"),i.embalagem?"emb. "+nq(i.embalagem,i.unidade):null,s.ult?dm(s.ult.data)+" "+(ESTQ_MOV[s.ult.tipo]||"").toLowerCase():null].filter(Boolean).join(" · "))),
+      h("td",{class:"n r"+(s.saldo<=0?" su-est":"")},nq(s.saldo,i.unidade)),
+      ...(comPreco?[h("td",{class:"n r"},i.preco_unit_rs!=null?"R$ "+nf(s.saldo*Number(i.preco_unit_rs),0):"—")]:[]));
+    const abrir=()=>{const nx=tr.nextElementSibling;if(nx&&nx.classList.contains("estq-det")){nx.remove();return;}
+      const movs=estq().mov.filter(m=>m.item_id===i.id).sort(estqOrd).reverse().slice(0,8);const it={...i,_so:true};
+      const box=h("div",{class:"mj-prot"},...(movs.length?movs.map(m=>estqLinhaMov(m,it)):[h("div",{class:"note"},"Sem movimentos.")]));
+      tr.after(h("tr",{class:"estq-det"},h("td",{colspan:comPreco?"3":"2"},box)));};
+    tr.addEventListener("click",e=>{if(e.target.closest("button"))return;abrir();});tr.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();abrir();}});
+    return tr;});
+  corpo.push(h("div",{class:"su-tw"},h("div",{class:"tbl"},h("table",{class:"su-tb"},h("thead",{},h("tr",{},h("th",{},"Item"),h("th",{class:"r"},"Saldo"),...(comPreco?[h("th",{class:"r"},"Valor")]:[]))),h("tbody",{},...linhas)))));
+  const notas=[vis.length+" itens"+(comPreco?" · R$ "+nf(valor,0)+" nos itens com preço":" · sem preços ainda"),aClass?aClass+" a classificar (tipo)":null,"Saldo = último inventário + entradas − saídas. Toque no item para ver os movimentos."].filter(Boolean);
+  corpo.push(h("div",{class:"note"},notas.join(" · ")));
+  /* movimentos recentes do barracão */
+  const rec=estq().mov.filter(m=>itens.some(i=>i.id===m.item_id)).sort(estqOrd).reverse().slice(0,6);
+  corpo.push(h("div",{class:"badge"},"Movimentos recentes"),rec.length?h("div",{},...rec.map(m=>estqLinhaMov(m,itens.find(i=>i.id===m.item_id)))):h("div",{class:"note"},"Sem movimentos."));
+  corpo.push(estqForm(reg));
+}
+/* registrar movimento: saída, entrada, inventário ou ajuste; item existente ou novo */
+function estqForm(reg){
+  const hoje=hojeIso();const itens=estqItensDe(reg.id);
+  const tipo=h("select",{},...Object.entries(ESTQ_MOV).map(([k,r])=>h("option",{value:k},r)));
+  const item=h("select",{},...itens.map(i=>h("option",{value:i.id},i.nome+" · "+nq(estqSaldo(i.id).saldo,i.unidade))),h("option",{value:"__novo"},"Novo item…"));
+  const nome=h("input",{type:"text",placeholder:"nome do item"}),cat=h("select",{},...Object.entries(ESTQ_CATS).map(([k,r])=>h("option",{value:k},r))),un=h("select",{},["L","kg","un"].map(u=>h("option",{value:u},u)));
+  const novo=h("div",{class:"grid2",hidden:true},nome,h("div",{class:"grid2"},cat,un));
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const qtd=h("input",{inputmode:"decimal",placeholder:"quantidade"}),emb=h("input",{type:"number",inputmode:"numeric",min:"0",step:"1",placeholder:"embalagens"});
+  const dest=h("select",{},h("option",{value:""},"Onde foi usado…"),...D.pastos.map(p=>h("option",{value:"p:"+p.id},p.nome)),h("option",{value:"t"},"Outro (descrever)"));
+  const destTxt=h("input",{type:"text",placeholder:"destino / finalidade",hidden:true});
+  const forn=h("input",{type:"text",placeholder:"fornecedor"}),doc=h("input",{type:"text",placeholder:"NF / documento"}),val=h("input",{inputmode:"decimal",placeholder:"valor pago (R$)"});
+  const obs=h("input",{type:"text",placeholder:"observação"});
+  const lSaida=h("div",{class:"grid2"},dest,destTxt),lEnt=h("div",{class:"grid2"},forn,h("div",{class:"grid2"},doc,val));
+  const unid=()=>item.value==="__novo"?un.value:(itens.find(i=>i.id===item.value)?.unidade||"");
+  const ajusta=()=>{const t=tipo.value;lSaida.hidden=t!=="saida";lEnt.hidden=t!=="entrada";
+    qtd.placeholder=(t==="inventario"?"contagem":t==="ajuste"?"ajuste (+ ou −)":"quantidade")+(unid()?" ("+unid()+")":"");novo.hidden=item.value!=="__novo";};
+  tipo.addEventListener("change",ajusta);item.addEventListener("change",ajusta);un.addEventListener("change",ajusta);dest.addEventListener("change",()=>{destTxt.hidden=dest.value!=="t";});ajusta();
+  const btn=h("button",{class:"btn pri sm",type:"button"},"Registrar movimento");
+  btn.addEventListener("click",async()=>{
+    const t=tipo.value;const q=suNumDec(qtd.value);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(data.value)||data.value>hoje)return suErro(btn,"Data inválida (não pode ser futura).");
+    if(q==null||Number.isNaN(q))return suErro(btn,"Informe a quantidade.");
+    if(t!=="ajuste"&&q<=0)return suErro(btn,"Quantidade deve ser maior que zero.");
+    if(t==="ajuste"&&q===0)return suErro(btn,"Ajuste de zero não muda nada.");
+    const e=emb.value===""?null:Number(emb.value);if(e!=null&&(!Number.isInteger(e)||e<0))return suErro(btn,"Embalagens: número inteiro.");
+    const passos=[];let itemId=item.value,itNome;
+    if(itemId==="__novo"){const n=nome.value.trim();if(!n)return suErro(btn,"Informe o nome do item novo.");
+      if(itens.some(i=>i.nome.toLowerCase()===n.toLowerCase()))return suErro(btn,"Já existe um item com esse nome.");
+      itemId=uuid4();itNome=n;passos.push({op:"insert",tabela:"estoque_itens",linha:{id:itemId,estrutura_id:reg.id,nome:n,categoria:cat.value,unidade:un.value,autor_email:D.email||null}});}
+    else{const it=itens.find(i=>i.id===itemId);if(!it)return suErro(btn,"Escolha o item.");itNome=it.nome;
+      if(t==="saida"){const s=estqSaldo(it.id).saldo;if(q>s+1e-9)return suErro(btn,"Saldo atual: "+nq(s,it.unidade)+". Se o estoque real é outro, lance um inventário antes.");}}
+    let destino=null,pasto_id=null;
+    if(t==="saida"){if(dest.value.startsWith("p:")){pasto_id=dest.value.slice(2);destino=pastoDe(pasto_id)?.nome||null;}else if(dest.value==="t"){destino=destTxt.value.trim()||null;}}
+    const v=t==="entrada"?suNumDec(val.value):null;if(v!=null&&(Number.isNaN(v)||v<0))return suErro(btn,"Valor em R$ inválido.");
+    passos.push({op:"insert",tabela:"estoque_movimentos",linha:{id:uuid4(),item_id:itemId,data:data.value,tipo:t,quantidade:q,embalagens:e,destino,pasto_id,
+      fornecedor:t==="entrada"?forn.value.trim()||null:null,documento:t==="entrada"?doc.value.trim()||null:null,valor_rs:v,obs:obs.value.trim()||null,status:"realizado",autor_email:D.email||null}});
+    const resumo="Estoque · "+ESTQ_MOV[t].toLowerCase()+" · "+itNome+" · "+nq(Math.abs(q),unid())+(destino?" · "+destino:"")+" · "+dm(data.value);
+    btn.disabled=true;btn.textContent="Gravando…";
+    try{const r=await gravarLote(resumo,passos);if(r.fila){rerenderAposGravar();return;}}
+    catch(err){btn.disabled=false;btn.textContent="Registrar movimento";return suErro(btn,"Falhou: "+err.message);}
+    await carregar();rerender();});
+  return h("div",{class:"regform"},h("div",{class:"badge"},"Registrar movimento"),h("div",{class:"grid2"},tipo,data),item,novo,h("div",{class:"grid2"},qtd,emb),lSaida,lEnt,obs,btn);
+}
+
 /* ---------- ficha da estrutura ---------- */
 function selEstrutura(id){selEstrId=id;selN=null;selLoteId=null;
   document.querySelectorAll(".map .pasto").forEach(e=>e.classList.remove("sel"));
@@ -1582,8 +1704,8 @@ function selEstrutura(id){selEstrId=id;selN=null;selLoteId=null;
       hist.length?h("div",{},...hist.slice(0,6).map(a=>h("div",{class:"ev"},h("span",{class:"d"},dmy(a.data)+" · "),seloFila(a),a.alimento+(a.quantidade_kg?" · "+nf(a.quantidade_kg,0)+" kg":""),a.obs?h("div",{class:"d"},a.obs):null))):h("div",{class:"note"},"Sem abastecimentos."));
     corpo.push(regAbastecimento(reg.id));
   }
-  if(reg&&(reg.tipo==="estoque"||reg.tipo==="maquinas"))
-    corpo.push(h("div",{class:"note"},reg.tipo==="estoque"?"Saldo por insumo, movimentações e autonomia entram na carga do estoque (próximo passo).":"Cadastro da frota, manutenções, consumo e operações entram no próximo passo."));
+  if(reg&&reg.tipo==="estoque")estqFicha(reg,corpo);
+  if(reg&&reg.tipo==="maquinas")corpo.push(h("div",{class:"note"},"Cadastro da frota, manutenções, consumo e operações entram no próximo passo."));
   if(reg&&reg.tipo==="pluviometro"){
     if(D.chuvaFoto?.ativo)gpsIniciar();
     const ac=chuvaAcum(reg.id);
@@ -2332,7 +2454,7 @@ async function enviarFotoChuva(it){
 }
 
 /* --- sobreposição: o que está na fila aparece nas fichas com o selo "A enviar" --- */
-const FILA_MAPA={leituras_chuva:["chuva"],inspecoes_agua:["insp"],abastecimentos_cocho:["abast"],fotos:["fotos"],premissas:["prem"],movimentacoes_pastos:["mov"],eventos_rebanho:["evReb"],
+const FILA_MAPA={leituras_chuva:["chuva"],inspecoes_agua:["insp"],abastecimentos_cocho:["abast"],fotos:["fotos"],premissas:["prem"],movimentacoes_pastos:["mov"],eventos_rebanho:["evReb"],estoque_itens:["estq","itens"],estoque_movimentos:["estq","mov"],
   suinos_movimentos:["su","mov"],suinos_reproducao:["su","repro"],suinos_pesagens:["su","pes"],suinos_alimentacao:["su","alim"],suinos_sanidade:["su","san"],suinos_reprodutores:["su","rep"]};
 const filaAlvo=t=>{const m=FILA_MAPA[t];if(!m)return null;const obj=m.length===2?D[m[0]]:D;const k=m[m.length-1];return obj&&Array.isArray(obj[k])?{obj,k}:null;};
 const ORDENA_DATA=new Set(["chuva","insp","abast","evReb"]);
@@ -2350,7 +2472,7 @@ function aplicarFila(){
   for(const k of ORDENA_DATA)if(Array.isArray(D[k]))D[k].sort((a,b)=>a.data<b.data?1:a.data>b.data?-1:((a.criado_em||"")<(b.criado_em||"")?1:-1));
   if(Array.isArray(D.fotos))D.fotos.sort((a,b)=>(a.criado_em||"")<(b.criado_em||"")?1:-1);
 }
-const _defaultsFila=t=>t.startsWith("suinos_")?(t==="suinos_reprodutores"?{situacao:"ativo"}:{status:"realizado"}):t==="leituras_chuva"?{origem:"manual"}:t==="eventos_rebanho"?{status:"realizado"}:{};
+const _defaultsFila=t=>t.startsWith("suinos_")?(t==="suinos_reprodutores"?{situacao:"ativo"}:{status:"realizado"}):t==="leituras_chuva"?{origem:"manual"}:t==="eventos_rebanho"||t==="estoque_movimentos"?{status:"realizado"}:t==="estoque_itens"?{ativo:true}:{};
 const seloFila=r=>r&&(r._fila||r._filaUpd)?h("span",{class:"selo prog",title:"Guardado no celular — será enviado quando houver conexão"},"A enviar"):null;
 /* o retrato local não leva o que está na fila (a fila é guardada à parte) */
 function semFila(obj){const c={...obj};
