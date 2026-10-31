@@ -214,6 +214,8 @@ td.su-est{color:var(--muted)}
 .su-conf-b{display:flex;gap:6px;margin-left:auto}
 .su-hist[hidden]{display:none}
 .regform .btn.foto{min-height:44px}
+.mud-row{display:flex;justify-content:flex-end;margin-top:2px}
+.regform.mudanca{margin-top:6px}
 .ev .selo{margin-left:6px}
 .comp-list+.kv{margin-top:-10px;padding-top:10px;border-top:1px dashed var(--line)}
 .panel .badge+.kv{margin-top:-2px}
@@ -467,6 +469,10 @@ const mesCurto=m=>{const r=/^(\d{2})\/(\d{4})$/.exec(m||"");if(!r)return m||"";r
 const premEscopo=e=>e==="geral"?"Geral":e.startsWith("cultivar:")?e.slice(9):e.startsWith("pasto:")?"Pasto "+e.slice(6):e;
 const premValor=p=>/^\d{4}-\d{2}-\d{2}$/.test(p.valor)?dmy(p.valor):p.valor+(p.unidade&&p.unidade!=="data"?" "+p.unidade:"");
 const nf=(v,d=2)=>Number(v).toLocaleString("pt-BR",{minimumFractionDigits:d,maximumFractionDigits:d});
+/* dias entre uma data (AAAA-MM-DD) e hoje, por dia-calendário local — nunca negativo */
+const diasDesde=iso=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||"");if(!m)return 0;const h=new Date();
+  return Math.max(0,Math.round((Date.UTC(h.getFullYear(),h.getMonth(),h.getDate())-Date.UTC(+m[1],+m[2]-1,+m[3]))/86400000));};
+const nDias=n=>n===1?"1 dia":n+" dias";
 const dmy=iso=>{if(!iso)return"";const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso);return m?`${m[3]}/${m[2]}/${m[1]}`:iso;};
 const h=(tag,attrs={},...kids)=>{const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k==="class")e.className=v;else if(k==="html")e.innerHTML=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(v!==false&&v!=null)e.setAttribute(k,v===true?"":v);}for(const c of kids.flat()){if(c==null)continue;e.append(c.nodeType?c:document.createTextNode(c));}return e;};
 const NS="http://www.w3.org/2000/svg";
@@ -943,12 +949,13 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
         inp.addEventListener("change",async()=>{inp.disabled=true;const err=await salvarAltura(m.id,campo,inp.value);
           inp.disabled=false;inp.style.borderColor=err==="fila"?"var(--warn)":err?"var(--bad)":"var(--ok)";inp.title=err==="fila"?"guardado no celular — será enviado quando houver conexão":(err||"gravado");});
         return h("span",{class:"inline-edit"},label,inp,meta!=null?h("span",{class:"meta"},"preconizado "+nf(meta,0)):null);};
-      corpo.push(h("dl",{class:"kv"},h("dt",{},"Lote"),h("dd",{},lote(m.lote_id)),h("dt",{},"Cabeças"),h("dd",{},String(m.cabecas)),
-        h("dt",{},"Entrada"),h("dd",{},dmy(m.entrada)+" · "+Math.max(0,Math.round((Date.now()-new Date(m.entrada))/86400000))+" dias"),
+      corpo.push(h("dl",{class:"kv"},h("dt",{},"Lote"),h("dd",{},lote(m.lote_id),seloFila(m)),h("dt",{},"Cabeças"),h("dd",{},String(m.cabecas)),
+        h("dt",{},"Entrada"),h("dd",{},dmy(m.entrada)+" · "+nDias(diasDesde(m.entrada))),
         h("dt",{},"Lotação"),h("dd",{},nf(m.cabecas/p.area_oficial_ha,1)+" cab/ha · "+nf(UA(m.cabecas)/p.area_oficial_ha,2)+" UA/ha")),
-        h("div",{class:"inline-edit"},edit("altura_entrada_cm","Altura de entrada (cm):",metaE),edit("altura_saida_cm","Altura de saída (cm):",metaS)));
+        h("div",{class:"inline-edit"},edit("altura_entrada_cm","Altura de entrada (cm):",metaE),edit("altura_saida_cm","Altura de saída (cm):",metaS)),
+        h("div",{class:"mud-row"},btnMudanca({origem:m})));
     });
-    else corpo.push(h("div",{class:"note"},"Sem lote no pasto."));
+    else corpo.push(h("div",{class:"note"},"Sem lote no pasto."),ocupVig().length?h("div",{class:"mud-row"},btnMudanca({destino:p})):null);
   }
   if(painelTab==="manejos"){
     const ids=o.map(m=>m.lote_id);
@@ -1011,7 +1018,7 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
     const escD=["pasto:"+n,"cultivar:"+(pgD?.cultivar||"")];
     const metaED=premNum("altura_entrada_meta_cm",escD,null),metaSD=premNum("altura_saida_meta_cm",escD,null);
     corpo.push(h("div",{class:"badge"},"Desempenho — sem pesagem (não há balança)"));
-    if(o.length)o.forEach(m=>{const dias=Math.max(0,Math.round((Date.now()-new Date(m.entrada))/86400000));
+    if(o.length)o.forEach(m=>{const dias=diasDesde(m.entrada);
       corpo.push(h("dl",{class:"kv"},h("dt",{},"Lotação"),h("dd",{},nf(m.cabecas/p.area_oficial_ha,1)+" cab/ha"),
         h("dt",{},"UA/ha"),h("dd",{},nf(UA(m.cabecas)/p.area_oficial_ha,2)+" (ref. 0,75 UA/cab)"),
         h("dt",{},"Dias de ocupação"),h("dd",{},String(dias)),
@@ -1028,6 +1035,81 @@ function selPasto(n,tab){selN=n;selEstrId=null;if(tab)painelTab=tab;if(!ABAS.fin
   mostrarFicha(pn);
 }
 const mapIdByNome=nome=>(MAP.estruturas||[]).find(s=>s.nome===nome)?.id;
+
+/* ---------- mudança de pasto do lote (ficha do pasto, aba Pasto) ----------
+   Uma gravação só, tudo ou nada: encerra a ocupação de origem (saída) e abre a nova no destino (entrada).
+   Mudança parcial: a ocupação de origem segue com as cabeças que ficaram; a linha nova leva as que mudaram.
+   Serve dos dois lados — "Mudar de pasto" no pasto ocupado e "Trazer lote para cá" no pasto de destino. */
+const ocupVig=()=>D.mov.filter(m=>!m.saida);
+const pastoDe=id=>D.pastos.find(p=>p.id===id);
+const cultivarDe=p=>p?(D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27")?.cultivar||""):"";
+const metaAltura=(chave,p)=>p?premNum(chave,["pasto:"+p.numero,"cultivar:"+cultivarDe(p)],null):null;
+const descPasto=p=>{const oc=ocupVig().filter(m=>m.pasto_id===p.id);
+  const situ=D.pastagem.find(x=>x.pasto_id===p.id&&x.safra==="2026/27")?.situacao;
+  return p.nome+(oc.length?" · "+oc.map(m=>lote(m.lote_id)+" "+m.cabecas+" cab").join(" + "):" · livre")+(situ==="Em formação"?" · em formação":"");};
+const numOuNulo=v=>{const s=String(v??"").trim().replace(",",".");if(!s)return null;const n=Number(s);return Number.isFinite(n)?n:NaN;};
+
+/* botão + formulário embutido; `origem` = ocupação vigente (quando a ficha é do pasto ocupado) ou `destino` = pasto da ficha vazia */
+function btnMudanca({origem,destino}){
+  const b=h("button",{class:"btn sm mud-btn",type:"button"},origem?"Mudar de pasto":"Trazer lote para cá");
+  b.addEventListener("click",()=>{const f=formMudanca({origem,destino,fechar:()=>{f.remove();b.hidden=false;}});b.hidden=true;b.after(f);
+    f.querySelector("select, input")?.focus({preventScroll:true});});
+  return b;
+}
+function formMudanca({origem,destino,fechar}){
+  const hoje=isoDia(Date.now());
+  let orig=origem||ocupVig()[0]||null;
+  const selOrig=origem?null:h("select",{},...ocupVig().map(m=>h("option",{value:m.id},lote(m.lote_id)+" · "+(pastoDe(m.pasto_id)?.nome||"—")+" · "+m.cabecas+" cab")));
+  const selDest=destino?null:h("select",{});
+  const data=h("input",{type:"date",value:hoje,max:hoje});
+  const cab=h("input",{type:"number",inputmode:"numeric",min:"1",step:"1"});
+  const hs=h("input",{inputmode:"decimal",placeholder:"cm"}),he=h("input",{inputmode:"decimal",placeholder:"cm"});
+  const obs=h("input",{type:"text",placeholder:"observação"});
+  const lHs=h("label",{class:"f"},"",hs),lHe=h("label",{class:"f"},"",he);
+  const dest=()=>destino||pastoDe(selDest.value);
+  const montarDest=()=>{if(!selDest||!orig)return;const atual=selDest.value;
+    selDest.replaceChildren(...D.pastos.filter(p=>p.id!==orig.pasto_id).map(p=>h("option",{value:p.id},descPasto(p))));
+    if(atual&&[...selDest.options].some(o=>o.value===atual))selDest.value=atual;};
+  const metas=()=>{const po=pastoDe(orig?.pasto_id),pd=dest();
+    const mS=metaAltura("altura_saida_meta_cm",po),mE=metaAltura("altura_entrada_meta_cm",pd);
+    lHs.firstChild.textContent="Altura de saída · "+(po?.nome||"—")+(mS!=null?" · preconizado "+nf(mS,0):"");
+    lHe.firstChild.textContent="Altura de entrada · "+(pd?.nome||"—")+(mE!=null?" · preconizado "+nf(mE,0):"");
+    const parcial=orig&&Number(cab.value)>0&&Number(cab.value)<orig.cabecas;
+    lHs.hidden=!!parcial;/* numa mudança parcial o lote segue no pasto de origem — não há saída a medir */
+  };
+  const montarOrig=()=>{if(selOrig)orig=ocupVig().find(m=>m.id===selOrig.value)||null;
+    cab.value=orig?String(orig.cabecas):"";cab.max=orig?String(orig.cabecas):"";data.min=orig?.entrada||"";
+    montarDest();metas();};
+  if(selOrig)selOrig.addEventListener("change",montarOrig);if(selDest)selDest.addEventListener("change",metas);cab.addEventListener("input",metas);
+  montarOrig();
+  const ok=h("button",{class:"btn pri sm",type:"button"},"Gravar mudança"),fe=h("button",{class:"btn sm",type:"button"},"Fechar sem gravar");
+  const f=h("div",{class:"regform mudanca"},h("div",{class:"badge"},destino?"Trazer lote para o "+destino.nome:"Mudança de pasto · "+lote(orig?.lote_id)),
+    selOrig?h("label",{class:"f"},"Lote que muda",selOrig):null,
+    selDest?h("label",{class:"f"},"Para o pasto",selDest):null,
+    h("div",{class:"grid2"},h("label",{class:"f"},"Data da mudança",data),h("label",{class:"f"},"Cabeças que mudam",cab)),
+    h("div",{class:"grid2"},lHs,lHe),obs,h("div",{class:"grid2"},fe,ok));
+  fe.addEventListener("click",fechar);
+  ok.addEventListener("click",async()=>{
+    const pd=dest();if(!orig)return suErro(ok,"Não há lote em pasto para mudar.");if(!pd)return suErro(ok,"Escolha o pasto de destino.");
+    if(pd.id===orig.pasto_id)return suErro(ok,"O lote já está nesse pasto.");
+    const n=Number(cab.value);if(!Number.isInteger(n)||n<1||n>orig.cabecas)return suErro(ok,"Cabeças: informe de 1 a "+orig.cabecas+".");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(data.value))return suErro(ok,"Informe a data da mudança.");
+    if(data.value<orig.entrada)return suErro(ok,"A mudança não pode ser antes da entrada no pasto ("+dmy(orig.entrada)+").");
+    if(data.value>hoje)return suErro(ok,"A data não pode ser futura — a mudança é apontada depois de feita.");
+    const parcial=n<orig.cabecas;const vS=parcial?null:numOuNulo(hs.value),vE=numOuNulo(he.value);
+    if(Number.isNaN(vS)||Number.isNaN(vE))return suErro(ok,"Altura em cm: só números.");
+    if(ocupVig().some(m=>m.id!==orig.id&&m.lote_id===orig.lote_id&&m.pasto_id===pd.id))return suErro(ok,"Esse lote já tem ocupação vigente em "+pd.nome+".");
+    const po=pastoDe(orig.pasto_id);
+    const upd=parcial?{cabecas:orig.cabecas-n,obs:(orig.obs?orig.obs+" · ":"")+dmy(data.value)+": "+n+" cab para "+pd.nome}:{saida:data.value,...(vS!=null?{altura_saida_cm:vS}:{})};
+    const linha={id:uuid4(),lote_id:orig.lote_id,pasto_id:pd.id,cabecas:n,entrada:data.value,obs:obs.value.trim()||(parcial?"parte do lote vinda de "+(po?.nome||"—"):null),...(vE!=null?{altura_entrada_cm:vE}:{})};
+    const resumo="Mudança · "+lote(orig.lote_id)+" · "+(po?.nome||"—")+" → "+pd.nome+" · "+n+" cab · "+dmy(data.value).slice(0,5);
+    ok.disabled=true;fe.disabled=true;ok.textContent="Gravando…";
+    try{const r=await gravarLote(resumo,[{op:"update",tabela:"movimentacoes_pastos",chave:{id:orig.id},valores:upd},{op:"insert",tabela:"movimentacoes_pastos",linha}]);
+      if(r.fila){ok.blur();rerenderSeguro();selPasto(pd.numero,"pasto");return;}}
+    catch(e){ok.disabled=false;fe.disabled=false;ok.textContent="Gravar mudança";return suErro(ok,"Falhou: "+e.message);}
+    await carregar();rerender();selPasto(pd.numero,"pasto");});
+  return f;
+}
 
 /* ---------- ficha da estrutura ---------- */
 function selEstrutura(id){selEstrId=id;selN=null;
@@ -1761,8 +1843,10 @@ async function enviarFila(){
 }
 /* não refaz a tela enquanto o usuário está digitando num formulário */
 function rerenderSeguro(){const a=document.activeElement;
-  if(a&&a.closest&&a.closest(".regform,.inline-edit,.su-edf")){FILA.rerenderPendente=true;return;}
+  if(a&&a.closest&&a.matches("input,select,textarea")&&a.closest(".regform,.inline-edit,.su-edf")){FILA.rerenderPendente=true;return;}
   FILA.rerenderPendente=false;rerender();if(selEstrId)selEstrutura(selEstrId);else if(selN)selPasto(selN);}
+/* a tela adiada é refeita quando o usuário sai do campo */
+document.addEventListener("focusout",()=>{if(FILA.rerenderPendente)setTimeout(()=>{if(FILA.rerenderPendente)rerenderSeguro();},150);});
 
 async function enviarItem(it){
   if(it.tipo==="foto_chuva")return enviarFotoChuva(it);
@@ -2345,7 +2429,7 @@ function viewConsultas(main){
   const bloco=(titulo,...corpo)=>h("details",{class:"consulta"},h("summary",{},titulo),h("div",{class:"c-corpo"},...corpo.flat().filter(Boolean)));
 
   /* 1 — posição do rebanho */
-  const posRows=vig.map(m=>{const p=pastoDe(m);const dias=Math.max(0,Math.round((hoje-new Date(m.entrada))/86400000));
+  const posRows=vig.map(m=>{const p=pastoDe(m);const dias=diasDesde(m.entrada);
     return h("tr",{},h("td",{},lote(m.lote_id)),h("td",{},p?.nome||"—"),h("td",{class:"n"},String(m.cabecas)),
       h("td",{class:"n"},dmy(m.entrada)),h("td",{class:"n"},String(dias)),
       h("td",{class:"n"},p?nf(m.cabecas/p.area_oficial_ha,1):"—"),h("td",{class:"n"},p?nf(UA(m.cabecas)/p.area_oficial_ha,2):"—"));});
@@ -2363,7 +2447,7 @@ function viewConsultas(main){
     if(oc)return h("tr",{},pcell,h("td",{class:"n"},"— / "+mtxt),h("td",{},"ocupado · "+lote(oc.lote_id)));
     const saidas=D.mov.filter(m=>m.pasto_id===p.id&&m.saida).map(m=>m.saida).sort();
     const ult=saidas[saidas.length-1];
-    const desc=ult?Math.max(0,Math.round((hoje-new Date(ult))/86400000)):null;
+    const desc=ult?diasDesde(ult):null;
     const status=desc==null?"sem ocupação anterior":meta==null?"sem meta de descanso":(desc>=meta?h("span",{class:"selo vig"},"PRONTO"):"faltam "+nf(meta-desc,0)+" dias");
     return h("tr",{},pcell,h("td",{class:"n"},(desc!=null?String(desc):"—")+" / "+mtxt),h("td",{},status));});
   const b2=bloco("2 · Prontidão de pastos (descanso × meta)",
