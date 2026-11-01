@@ -3526,17 +3526,18 @@ function viewSimulador(main){
 
 /* ---------- vista: relatórios ---------- */
 function viewRelatorios(main){
-  /* aba de relatórios: hoje só a Posição Semanal; novos relatórios entram aqui como novos blocos */
+  /* aba de relatórios: a Posição do Ciclo (uma por data-base; gerada a cada atualização do modelo e toda segunda);
+     novos relatórios entram aqui como novos blocos */
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 10px"},"Relatórios"),
-    h("div",{class:"badge"},"Posição Semanal"),
+    h("div",{class:"badge"},"Posição do Ciclo"),
     D.rel.length?h("div",{},
       relLinha(D.rel[0],true),
       D.rel.length>1?h("details",{class:"pasta-rel"},
         h("summary",{},"Posições anteriores ("+Math.min(3,D.rel.length-1)+")"),
         ...D.rel.slice(1,4).map(r=>relLinha(r,false))):null
-    ):h("div",{class:"note"},"Nenhuma posição semanal registrada no banco ainda."),
-    h("p",{class:"note",style:"margin-top:8px"},"A posição vigente fica em destaque; a pasta guarda as 3 anteriores. As mais antigas saem da exibição, mas permanecem registradas no banco.")));
+    ):h("div",{class:"note"},"Nenhuma posição registrada no banco ainda."),
+    h("p",{class:"note",style:"margin-top:8px"},"Uma posição por data-base, gerada a cada atualização do modelo e toda segunda-feira. A vigente fica em destaque; a pasta guarda as 3 anteriores — as mais antigas saem da exibição, mas permanecem registradas no banco.")));
 }
 
 function relLinha(r,vigente){
@@ -3573,7 +3574,8 @@ function relLinha(r,vigente){
     if(e2){anexar.textContent="Falhou: "+e2.message;anexar.disabled=false;return;}
     await carregar();rerender();
   });
-  return h("div",{class:"ev"},h("span",{class:"d"},dmy(r.data_ref)+" · "),r.titulo||"Relatório semanal"," ",
+  const tit=(r.titulo||"Posição do Ciclo").replace(/\s—\s(data-base\s)?\d{2}\/\d{2}\/\d{4}$/,"");   // a data já abre a linha
+  return h("div",{class:"ev"},h("span",{class:"d"},dmy(r.data_ref)+" · "),tit," ",
     vigente?h("span",{class:"selo vig"},"Vigente"):null,
     r.storage_path?h("span",{class:"selo "+(vigente?"hist":"hist")},"No banco"):h("span",{class:"selo hist"},"Arquivo no Mac")," ",
     abrir,r.storage_path?null:anexar,r.storage_path?null:inp);
