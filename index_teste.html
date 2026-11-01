@@ -847,11 +847,18 @@ function fotoBotao(ctx,cls){
         meta:{path,objeto_tipo:ctx.objeto_tipo,objeto_id:ctx.objeto_id,aba:ctx.aba||null,tabela:ctx.tabela||null,apont:ctx.id||null},
         passos:[{op:"insert",tabela:"fotos",linha}]};
       await filaAdicionar(it);const r=await esperarEnvio(it);
-      if(r.fila){rerenderAposGravar();return;}
-      await carregar();rerender();
+      if(!r.fila){try{await carregar();}catch(e){}}
+      fotoRefazer(btn,ctx);
     }catch(e){btn.textContent="Falhou: "+(e?.message||e);btn.disabled=false;setTimeout(()=>{if(btn.isConnected){btn.textContent=rot;}},4000);return;}
   });
   return h("span",{class:"fl-btn"},btn,inp);}
+/* refaz só o bloco de fotos de onde o botão veio — a ficha (e qualquer formulário em preenchimento) fica como está */
+function fotoRefazer(btn,ctx){
+  const fl=btn.closest(".fl");
+  if(fl&&ctx.tabela){fl.replaceWith(fotoLinha(ctx.tabela,ctx.id,ctx,!fl.classList.contains("fl-c")));return;}
+  const strip=btn.closest(".fotos-strip");
+  if(strip){strip.replaceWith(fotoStrip(ctx.objeto_tipo,ctx.objeto_id,ctx.aba));return;}
+  rerenderSeguro();}
 /* linha de fotos de um apontamento: em destaque (miniaturas) quando é o último do objeto; compacta no histórico */
 function fotoLinha(tabela,id,ctx,destaque){
   if(!id)return null;
@@ -867,7 +874,7 @@ function fotoTentativa(c){if(!c||c.origem!=="foto"||!c.tentativa_id)return null;
 function fotoLinhaChuva(c,ctx,destaque){const el=fotoLinha("leituras_chuva",c.id,ctx,destaque);const t=fotoTentativa(c);if(t&&el)el.prepend(t);return el;}
 /* ficha: fotos soltas recentes em destaque + pasta com tudo o que não está em destaque (agrupado por apontamento) */
 function fotoStrip(tipo,id,aba){
-  const box=h("div",{});
+  const box=h("div",{class:"fotos-strip"});
   const todas=D.fotos.filter(f=>f.objeto_tipo===tipo&&f.objeto_id===id&&(aba?(f.aba||null)===aba||(f.apontamento_tabela&&APONT[f.apontamento_tabela]&&APONT[f.apontamento_tabela].aba===aba):true));
   const soltas=todas.filter(fotoSolta),recentes=soltas.filter(fotoRecente);
   const vinc=todas.filter(f=>!fotoSolta(f));
