@@ -301,6 +301,9 @@ td.su-est{color:var(--muted)}
 .fotogrid{display:flex;gap:8px;flex-wrap:wrap}
 .fotogrid img{width:84px;height:84px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer}
 .fotogrid .mais{width:84px;height:84px;display:grid;place-items:center;border:1px dashed var(--line);border-radius:6px;color:var(--muted);font-size:12px;cursor:pointer;background:none}
+.fl{margin-top:6px}.fl-c img{width:44px;height:44px}.fl-btn{display:inline-flex}.fl-c{align-items:center}
+.fl-mais{border:1px dashed var(--line);border-radius:6px;background:none;color:var(--muted);font:500 11px var(--f-mono);padding:0 8px;height:28px;cursor:pointer}
+.fl-c .foto-fila::after{font-size:7px;padding:1px 3px}
 .fotofull{position:fixed;inset:0;background:rgba(0,0,0,.85);display:grid;place-items:center;z-index:50;cursor:zoom-out}
 .fotofull img{max-width:92vw;max-height:92vh;border-radius:8px}
 .inline-edit{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -445,6 +448,7 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:now
   .ptabs button{min-height:40px;padding-block:8px}
   .chip span{padding:9px 14px}
   .fotogrid img,.fotogrid .mais{width:96px;height:96px}
+  .fl-c img{width:52px;height:52px}
 }
 /* ---- telas estreitas: tabelas compactas e premissas em cartão ---- */
 @media (max-width:640px){
@@ -650,7 +654,7 @@ async function carregar(){
     q("estruturas","id,nome,tipo,obs"),
     q("lotes","id,nome,atividade"),
     q("estrutura_pastos","estrutura_id,pasto_id"),
-    q("fotos","id,objeto_tipo,objeto_id,aba,path,legenda,autor_email,criado_em",["criado_em",{ascending:false}]),
+    q("fotos","*",["criado_em",{ascending:false}]),
     q("inspecoes_agua","id,estrutura_id,data,funcionamento,limpeza,qualidade,obs,autor_email",["data",{ascending:false}]),
     q("abastecimentos_cocho","id,estrutura_id,data,alimento,quantidade_kg,obs,autor_email",["data",{ascending:false}]),
     q("solo_pastos","pasto_id,ano,camada,atributo,valor,unidade,metodo"),
@@ -788,32 +792,96 @@ const urlCache={};
 async function fotoUrl(path){if(urlCache[path])return urlCache[path];
   const{data,error}=await sb.storage.from("fotos").createSignedUrl(path,3600);
   if(error)return null;urlCache[path]=data.signedUrl;return data.signedUrl;}
-function fotoStrip(tipo,id,aba){
-  const box=h("div",{});
-  const fotos=D.fotos.filter(f=>f.objeto_tipo===tipo&&f.objeto_id===id&&(aba?f.aba===aba:true));
-  const grid=h("div",{class:"fotogrid"});
-  fotos.slice(0,12).forEach(async f=>{const img=h("img",{alt:f.legenda||"Foto",title:(f.legenda?f.legenda+" · ":"")+dmy(f.criado_em)+(f._fila?" · a enviar":"")});
-    const url=async()=>f._blob?URL.createObjectURL(f._blob):fotoUrl(f.path);
-    img.addEventListener("click",async()=>{const u=await url();if(!u)return;
-      abrirViewer(u,(f.legenda?f.legenda+" · ":"")+dmy(f.criado_em));});
-    const u=await url();if(u)img.src=u;
-    if(f._fila){const w=h("span",{class:"foto-fila"},img);grid.append(w);}else grid.append(img);});
+/* ---------- fotos (regra de 01/11/2026) ----------
+   A foto, normalmente, pertence a um apontamento: o "+ foto" fica dentro do apontamento (ao gravar e no histórico) e a
+   foto acompanha o apontamento onde ele for consultado. A ficha mostra em destaque as fotos do ÚLTIMO apontamento e as
+   fotos soltas de até 7 dias; todas as outras ficam na pasta "Fotos anteriores" da ficha (arquivamento lógico —
+   nada se apaga nem se move). */
+const FOTO_DIAS_SOLTA=7;
+const fotoSolta=f=>!f.apontamento_id;
+const fotoRecente=f=>diasDesde((f.criado_em||"").slice(0,10))<FOTO_DIAS_SOLTA;
+const suEstrId=()=>D.estr.find(e=>e.tipo==="suinos")?.id||null;
+/* registro dos apontamentos que podem ter foto: linhas, data, objeto da ficha e rótulo para a pasta */
+const APONT={
+  inspecoes_agua:{rows:()=>D.insp,data:r=>r.data,obj:r=>["estrutura",r.estrutura_id],rot:()=>"Inspeção"},
+  abastecimentos_cocho:{rows:()=>D.abast,data:r=>r.data,obj:r=>["estrutura",r.estrutura_id],rot:r=>"Abastecimento · "+(r.alimento||"")},
+  leituras_chuva:{rows:()=>D.chuva,data:r=>r.data,obj:r=>["estrutura",r.estrutura_id],rot:r=>"Leitura · "+nf(r.mm,1)+" mm"},
+  movimentacoes_pastos:{rows:()=>D.mov,data:r=>r.entrada,obj:r=>["pasto",r.pasto_id],rot:r=>"Ocupação · "+lote(r.lote_id)},
+  eventos_pastagem:{rows:()=>D.evPas,data:r=>r.data,obj:r=>["pasto",r.pasto_id],rot:r=>cap(r.tipo)+(r.produto?" · "+r.produto:"")},
+  eventos_rebanho:{rows:()=>D.evReb,data:r=>r.data,obj:r=>r.lote_id?["lote",r.lote_id]:["rebanho",null],rot:r=>mjTipoRot(r.tipo)+(r.produto?" · "+mjProdCurto(r.produto):"")},
+  suinos_movimentos:{rows:()=>(D.su&&D.su.mov)||[],data:r=>r.data,obj:()=>["estrutura",suEstrId()],aba:"plantel",rot:r=>cap(r.origem_tipo||r.tipo)},
+  suinos_reproducao:{rows:()=>(D.su&&D.su.repro)||[],data:r=>r.data,obj:()=>["estrutura",suEstrId()],aba:"reproducao",rot:r=>cap(r.tipo)},
+  suinos_pesagens:{rows:()=>(D.su&&D.su.pes)||[],data:r=>r.data,obj:()=>["estrutura",suEstrId()],aba:"pesagens",rot:()=>"Pesagem"},
+  suinos_alimentacao:{rows:()=>(D.su&&D.su.alim)||[],data:r=>r.data,obj:()=>["estrutura",suEstrId()],aba:"alimentacao",rot:r=>"Alimentação · "+(r.alimento||"")},
+  suinos_sanidade:{rows:()=>(D.su&&D.su.san)||[],data:r=>r.data,obj:()=>["estrutura",suEstrId()],aba:"sanidade",rot:r=>cap(r.tipo)+(r.produto?" · "+r.produto:"")},
+  estoque_movimentos:{rows:()=>(D.estq&&D.estq.mov)||[],data:r=>r.data,obj:r=>["estrutura",(D.estq.itens.find(i=>i.id===r.item_id)||{}).estrutura_id||null],rot:r=>cap(r.tipo)+" · "+((D.estq.itens.find(i=>i.id===r.item_id)||{}).nome||"")}
+};
+const apontRow=(tabela,id)=>{const a=APONT[tabela];return a?a.rows().find(r=>r.id===id)||null:null;};
+const apontOk=r=>!r.status||r.status!=="cancelado";
+/* o apontamento mais recente desta tabela para este objeto (data; desempate pela criação) — as fotos dele ficam em destaque */
+function apontUltimoId(tabela,objTipo,objId){const a=APONT[tabela];if(!a)return null;
+  let best=null;for(const r of a.rows()){if(!apontOk(r))continue;const o=a.obj(r);if(o[0]!==objTipo||o[1]!==objId)continue;
+    const k=(a.data(r)||"")+"|"+(r.criado_em||"");if(!best||k>best.k)best={k,id:r.id};}
+  return best?best.id:null;}
+const fotosDe=(tabela,id)=>D.fotos.filter(f=>f.apontamento_tabela===tabela&&f.apontamento_id===id);
+function fotoImg(f,cls){const img=h("img",{alt:f.legenda||"Foto",title:(f.legenda?f.legenda+" · ":"")+dmy(f.criado_em)+(f._fila?" · a enviar":"")});
+  const url=async()=>f._blob?URL.createObjectURL(f._blob):fotoUrl(f.path);
+  img.addEventListener("click",async()=>{const u=await url();if(!u)return;abrirViewer(u,(f.legenda?f.legenda+" · ":"")+dmy(f.criado_em));});
+  url().then(u=>{if(u)img.src=u;});
+  return f._fila?h("span",{class:"foto-fila"},img):img;}
+/* botão "+ foto": guarda a foto em bytes na fila, já com o vínculo ao apontamento (quando houver) */
+function fotoBotao(ctx,cls){
   const inp=h("input",{type:"file",accept:"image/*",hidden:true});
+  const btn=h("button",{class:cls||"mais",type:"button",onclick:()=>inp.click()},"+ foto");
   inp.addEventListener("change",async()=>{const file=inp.files[0];if(!file)return;
-    btn.textContent="Enviando…";btn.disabled=true;
-    try{const path=`${tipo}/${id}/${aba||"geral"}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_").replace(/\.[A-Za-z]+$/,"")}.jpg`;
+    const rot=btn.textContent;btn.textContent="Enviando…";btn.disabled=true;
+    try{const pasta=ctx.tabela?ctx.tabela+"/"+ctx.id:(ctx.aba||"geral");
+      const path=`${ctx.objeto_tipo}/${ctx.objeto_id}/${pasta}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_").replace(/\.[A-Za-z]+$/,"")}.jpg`;
       const blob=await reduzirFoto(file,2000).catch(()=>file);
       const foto=await blob.arrayBuffer();if(!foto.byteLength)throw new Error("a foto veio vazia — tire outra");
-      const it={id:uuid4(),tipo:"foto",quando:new Date().toISOString(),resumo:"Foto · "+(tipo==="pasto"?(D.pastos.find(p=>p.id===id)?.nome||"pasto"):(D.estr.find(e=>e.id===id)?.nome||"estrutura")),
-        estado:"aguardando",tentativas:0,autor:D.email||null,foto,fotoTipo:blob.type||"image/jpeg",meta:{path,objeto_tipo:tipo,objeto_id:id,aba:aba||null},passos:[{op:"insert",tabela:"fotos",linha:{objeto_tipo:tipo,objeto_id:id,aba:aba||null,path,autor_email:D.email}}]};
+      const linha={objeto_tipo:ctx.objeto_tipo,objeto_id:ctx.objeto_id,aba:ctx.aba||null,path,autor_email:D.email};
+      if(ctx.tabela){linha.apontamento_tabela=ctx.tabela;linha.apontamento_id=ctx.id;}
+      const nomeObj=ctx.objeto_tipo==="pasto"?(D.pastos.find(p=>p.id===ctx.objeto_id)?.nome||"pasto"):ctx.objeto_tipo==="lote"?lote(ctx.objeto_id):ctx.objeto_tipo==="rebanho"?"Rebanho":(D.estr.find(e=>e.id===ctx.objeto_id)?.nome||"estrutura");
+      const it={id:uuid4(),tipo:"foto",quando:new Date().toISOString(),resumo:"Foto · "+nomeObj+(ctx.tabela?" · "+(ctx.rotulo||"apontamento"):""),
+        estado:"aguardando",tentativas:0,autor:D.email||null,foto,fotoTipo:blob.type||"image/jpeg",
+        meta:{path,objeto_tipo:ctx.objeto_tipo,objeto_id:ctx.objeto_id,aba:ctx.aba||null,tabela:ctx.tabela||null,apont:ctx.id||null},
+        passos:[{op:"insert",tabela:"fotos",linha}]};
       await filaAdicionar(it);const r=await esperarEnvio(it);
       if(r.fila){rerenderAposGravar();return;}
       await carregar();rerender();
-    }catch(e){btn.textContent="Falhou: "+(e?.message||e);btn.disabled=false;return;}
+    }catch(e){btn.textContent="Falhou: "+(e?.message||e);btn.disabled=false;setTimeout(()=>{if(btn.isConnected){btn.textContent=rot;}},4000);return;}
   });
-  const btn=h("button",{class:"mais",type:"button",onclick:()=>inp.click()},"+ foto");
-  grid.append(btn,inp);
-  box.append(h("div",{class:"badge"},"Fotos"),grid);
+  return h("span",{class:"fl-btn"},btn,inp);}
+/* linha de fotos de um apontamento: em destaque (miniaturas) quando é o último do objeto; compacta no histórico */
+function fotoLinha(tabela,id,ctx,destaque){
+  if(!id)return null;
+  const fs=fotosDe(tabela,id);
+  const c=Object.assign({tabela,id},ctx||{});
+  if(destaque==null){const o=APONT[tabela]&&apontRow(tabela,id)?APONT[tabela].obj(apontRow(tabela,id)):[c.objeto_tipo,c.objeto_id];destaque=apontUltimoId(tabela,o[0],o[1])===id;}
+  if(destaque)return h("div",{class:"fotogrid fl"},...fs.map(f=>fotoImg(f)),fotoBotao(c));
+  return h("div",{class:"fl fl-c"},...fs.map(f=>fotoImg(f)),fotoBotao(c,"fl-mais"));}
+/* a foto da leitura pela foto vem da tentativa (servidor); entra como primeira miniatura da leitura */
+function fotoTentativa(c){if(!c||c.origem!=="foto"||!c.tentativa_id)return null;const t=(D.tentChuva||[]).find(t=>t.id===c.tentativa_id||t.leitura_id===c.id);
+  if(!t||!t.foto_path)return null;const img=h("img",{alt:"Foto da leitura",title:"Foto da leitura · "+dmy(c.data)});
+  fotoUrl(t.foto_path).then(u=>{if(u)img.src=u;});img.addEventListener("click",async()=>{const u=await fotoUrl(t.foto_path);if(u)abrirViewer(u,"Leitura · "+dmy(c.data)+" · "+nf(c.mm,1)+" mm");});return img;}
+function fotoLinhaChuva(c,ctx,destaque){const el=fotoLinha("leituras_chuva",c.id,ctx,destaque);const t=fotoTentativa(c);if(t&&el)el.prepend(t);return el;}
+/* ficha: fotos soltas recentes em destaque + pasta com tudo o que não está em destaque (agrupado por apontamento) */
+function fotoStrip(tipo,id,aba){
+  const box=h("div",{});
+  const todas=D.fotos.filter(f=>f.objeto_tipo===tipo&&f.objeto_id===id&&(aba?(f.aba||null)===aba||(f.apontamento_tabela&&APONT[f.apontamento_tabela]&&APONT[f.apontamento_tabela].aba===aba):true));
+  const soltas=todas.filter(fotoSolta),recentes=soltas.filter(fotoRecente);
+  const vinc=todas.filter(f=>!fotoSolta(f));
+  const ultimos={};const ehUltima=f=>{const k=f.apontamento_tabela;if(!(k in ultimos))ultimos[k]=apontUltimoId(k,tipo,id);return ultimos[k]===f.apontamento_id;};
+  const anteriores=[...soltas.filter(f=>!fotoRecente(f)),...vinc.filter(f=>!ehUltima(f))];
+  const grid=h("div",{class:"fotogrid"},...recentes.map(f=>fotoImg(f)),fotoBotao({objeto_tipo:tipo,objeto_id:id,aba}));
+  box.append(h("div",{class:"badge"},"Fotos avulsas",h("span",{class:"d"}," · últimos "+FOTO_DIAS_SOLTA+" dias")),grid);
+  if(anteriores.length){
+    const grupos=new Map();
+    for(const f of anteriores){const r=f.apontamento_tabela?apontRow(f.apontamento_tabela,f.apontamento_id):null;const a=r?APONT[f.apontamento_tabela]:null;
+      const k=r?f.apontamento_tabela+":"+f.apontamento_id:"solta:"+(f.criado_em||"").slice(0,10);
+      if(!grupos.has(k))grupos.set(k,{data:r?a.data(r):(f.criado_em||"").slice(0,10),rot:r?a.rot(r):"Sem apontamento",fotos:[]});grupos.get(k).fotos.push(f);}
+    const lista=[...grupos.values()].sort((x,y)=>x.data<y.data?1:-1).map(g=>h("div",{class:"ev"},h("span",{class:"d"},dmy(g.data)+" · "),g.rot,h("div",{class:"fotogrid fl-c"},...g.fotos.map(f=>fotoImg(f)))));
+    box.append(h("details",{class:"pasta-rel"},h("summary",{},"Fotos anteriores ("+anteriores.length+")"),...lista));}
   return box;}
 
 /* ---------- escrita ---------- */
@@ -1028,7 +1096,8 @@ function selPasto(n,tab){selN=n;selEstrId=null;selLoteId=null;if(tab)painelTab=t
         h("dt",{},"Entrada"),h("dd",{},dmy(m.entrada)+" · "+nDias(diasDesde(m.entrada))),
         h("dt",{},"Lotação"),h("dd",{},nf(m.cabecas/p.area_oficial_ha,1)+" cab/ha · "+nf(UA(m.cabecas)/p.area_oficial_ha,2)+" UA/ha")),
         h("div",{class:"inline-edit"},edit("altura_entrada_cm","Altura de entrada (cm):",metaE),edit("altura_saida_cm","Altura de saída (cm):",metaS)),
-        h("div",{class:"mud-row"},h("button",{class:"btn sm",type:"button",onclick:()=>selLote(m.lote_id)},"Ficha do lote"),btnMudanca({origem:m})));
+        h("div",{class:"mud-row"},h("button",{class:"btn sm",type:"button",onclick:()=>selLote(m.lote_id)},"Ficha do lote"),btnMudanca({origem:m})),
+        fotoLinha("movimentacoes_pastos",m.id,{objeto_tipo:"pasto",objeto_id:p.id,aba:"pasto",rotulo:"Ocupação"}));
     });
     else corpo.push(h("div",{class:"note"},"Sem lote no pasto."),ocupVig().length?h("div",{class:"mud-row"},btnMudanca({destino:p})):null);
   }
@@ -1045,12 +1114,12 @@ function selPasto(n,tab){selN=n;selEstrId=null;selLoteId=null;if(tab)painelTab=t
     es.forEach(e=>{
       if(e.tipo==="ponto_agua"){const ins=D.insp.filter(i=>i.estrutura_id===e.id)[0];
         corpo.push(h("div",{class:"badge"},e.nome,e.obs&&/instalar/i.test(e.obs)?h("span",{class:"selo prog"},"A instalar"):null),
-          ins?h("div",{class:"ev"},h("span",{class:"d"},dmy(ins.data)+" · "),["funcionamento","limpeza","qualidade"].map(k=>h("span",{class:"selo "+(ins[k]?"vig":"bad")},k.slice(0,4)+(ins[k]?" ok":" ✗"))),ins.obs?h("div",{class:"d"},ins.obs):null):h("div",{class:"note"},"Sem inspeção registrada."),
+          ins?h("div",{class:"ev"},h("span",{class:"d"},dmy(ins.data)+" · "),["funcionamento","limpeza","qualidade"].map(k=>h("span",{class:"selo "+(ins[k]?"vig":"bad")},k.slice(0,4)+(ins[k]?" ok":" ✗"))),ins.obs?h("div",{class:"d"},ins.obs):null,fotoLinha("inspecoes_agua",ins.id,{objeto_tipo:"estrutura",objeto_id:e.id,rotulo:"Inspeção"})):h("div",{class:"note"},"Sem inspeção registrada."),
           h("button",{class:"btn sm",type:"button",onclick:()=>selEstrutura(mapIdByNome(e.nome))},"Abrir ficha / registrar"),
           fotoStrip("estrutura",e.id,null));}
       if(e.tipo==="cocho"){const ab=D.abast.filter(a=>a.estrutura_id===e.id)[0];
         corpo.push(h("div",{class:"badge"},e.nome),
-          ab?h("div",{class:"ev"},h("span",{class:"d"},dmy(ab.data)+" · "),ab.alimento+(ab.quantidade_kg?" · "+nf(ab.quantidade_kg,0)+" kg":""),ab.obs?h("div",{class:"d"},ab.obs):null):h("div",{class:"note"},"Sem abastecimento registrado."),
+          ab?h("div",{class:"ev"},h("span",{class:"d"},dmy(ab.data)+" · "),ab.alimento+(ab.quantidade_kg?" · "+nf(ab.quantidade_kg,0)+" kg":""),ab.obs?h("div",{class:"d"},ab.obs):null,fotoLinha("abastecimentos_cocho",ab.id,{objeto_tipo:"estrutura",objeto_id:e.id,rotulo:"Abastecimento"})):h("div",{class:"note"},"Sem abastecimento registrado."),
           h("button",{class:"btn sm",type:"button",onclick:()=>selEstrutura(mapIdByNome(e.nome))},"Abrir ficha / registrar"),
           fotoStrip("estrutura",e.id,null));}
     });
@@ -1058,7 +1127,7 @@ function selPasto(n,tab){selN=n;selEstrId=null;selLoteId=null;if(tab)painelTab=t
   if(painelTab==="solo"){
     const fert=D.evPas.filter(e=>e.pasto_id===p.id&&e.status!=="cancelado"&&["calagem","adubacao","analise_solo"].includes(e.tipo));
     /* só o que existe: a seção aparece quando há calagem, adubação ou análise registrada */
-    if(fert.length)corpo.push(h("div",{class:"badge"},"Calagem e adubações"),h("div",{},...fert.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":""),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado")))));
+    if(fert.length)corpo.push(h("div",{class:"badge"},"Calagem e adubações"),h("div",{},...fert.map(e=>h("div",{class:"ev"},h("span",{class:"d"},dmy(e.data)+" · "),e.tipo+(e.produto?" — "+e.produto:"")+(e.dose?" ("+e.dose+")":""),fotoLinha("eventos_pastagem",e.id,{objeto_tipo:"pasto",objeto_id:p.id,aba:"solo",rotulo:cap(e.tipo)}),h("span",{class:"selo "+(e.status==="programado"?"prog":"hist")},e.status==="programado"?"Programado":"Realizado")))));
     const sp=D.solo.filter(x=>x.pasto_id===p.id);
     if(sp.length){
       const ano=Math.max(...sp.map(x=>x.ano));
@@ -1272,9 +1341,17 @@ function mjDetalhe(it){
   else if(it.status==="programado")add("Situação","Programado · "+mjQuando(it.data));
   if(it.autor)add("Lançado por",it.autor.split("@")[0]+(it.criado?" · "+dmy(it.criado.slice(0,10)):""));
   const det=h("div",{class:"mj-det"},h("div",{class:"l"},...l));
+  const fl=mjFotos(it);if(fl)det.append(fl);
   const acoes=mjAcoes(it);if(acoes)det.append(acoes);
   return det;
 }
+/* fotos do apontamento por trás do item (manejo, mudança de pasto, sanidade dos suínos, evento de pastagem) */
+function mjFotos(it){const r=it.raw;if(!r||!r.id)return null;
+  if(it.origem==="evReb")return fotoLinha("eventos_rebanho",r.id,r.lote_id?{objeto_tipo:"lote",objeto_id:r.lote_id,rotulo:it.tipo}:{objeto_tipo:"rebanho",objeto_id:null,rotulo:it.tipo});
+  if(it.origem==="mov")return fotoLinha("movimentacoes_pastos",r.id,{objeto_tipo:"pasto",objeto_id:r.pasto_id,aba:"pasto",rotulo:"Ocupação"});
+  if(it.origem==="su")return fotoLinha("suinos_sanidade",r.id,{objeto_tipo:"estrutura",objeto_id:suEstrId(),aba:"sanidade",rotulo:it.tipo});
+  if(it.origem==="evPas")return fotoLinha("eventos_pastagem",r.id,{objeto_tipo:"pasto",objeto_id:r.pasto_id,aba:"solo",rotulo:it.tipo});
+  return null;}
 function mjAlternar(row,it){
   const aberto=row.querySelector(".mj-det");if(aberto){aberto.remove();row.classList.remove("aberto");return;}
   row.append(mjDetalhe(it));row.classList.add("aberto");
@@ -1446,6 +1523,7 @@ function selLote(lid){
   }else corpo.push(h("div",{class:"note"},"Lote sem ocupação vigente."));
   corpo.push(mjBloco(mjItensLote(lid),{titulo:"Manejos"}));
   corpo.push(mjBotaoForm(lid));
+  corpo.push(fotoStrip("lote",lid,null));
   pn.replaceChildren(...corpo);mostrarFicha(pn);
 }
 /* ---- vista: central de manejos ---- */
@@ -1585,8 +1663,11 @@ function estqLinhaMov(m,it){
   const row=h("div",{class:"mj-hl"+(m.status==="cancelado"?" canc":"")},h("span",{class:"d"},dm(m.data)),
     h("span",{},h("span",{class:"t"},ESTQ_MOV[m.tipo]||m.tipo)," · "+(it&&!it._so?it.nome+" · ":"")+(m.tipo==="inventario"?"contagem ":sinal)+nq(Math.abs(Number(m.quantidade)),un),
       m.status==="cancelado"?h("span",{class:"selo hist"},"Anulado"):null,seloFila(m)),det?h("span",{class:"o"},det):null);
+  /* fotos do movimento: com foto, aparece na linha; sem foto, o "+ foto" fica com as ações (toque na linha) */
+  const fl=fotoLinha("estoque_movimentos",m.id,{objeto_tipo:"estrutura",objeto_id:(it||D.estq.itens.find(i=>i.id===m.item_id)||{}).estrutura_id,rotulo:ESTQ_MOV[m.tipo]||m.tipo});
+  const temFoto=fl&&fl.querySelector("img");if(temFoto)row.append(fl);
   const a=estqAnular(m);
-  if(a){const ac=h("div",{class:"mj-acoes",hidden:true},a);row.append(ac);row.title="Toque para as ações";
+  if(a||(fl&&!temFoto)){const ac=h("div",{class:"mj-acoes",hidden:true},...[a,fl&&!temFoto?fl:null].filter(Boolean));row.append(ac);row.title="Toque para as ações";
     row.addEventListener("click",e=>{if(e.target.closest("button"))return;ac.hidden=!ac.hidden;});}
   return row;
 }
@@ -1692,7 +1773,7 @@ function selEstrutura(id){selEstrId=id;selN=null;selLoteId=null;
   if(reg&&reg.tipo==="ponto_agua"){
     const hist=D.insp.filter(i=>i.estrutura_id===reg.id);
     corpo.push(h("div",{class:"badge"},"Inspeções"),
-      hist.length?h("div",{},...hist.slice(0,6).map(i=>h("div",{class:"ev"},h("span",{class:"d"},dmy(i.data)+" · "),seloFila(i),["funcionamento","limpeza","qualidade"].map(k=>h("span",{class:"selo "+(i[k]?"vig":"bad")},k==="funcionamento"?"func":k.slice(0,4))),i.obs?h("div",{class:"d"},i.obs):null))):h("div",{class:"note"},"Sem inspeções."));
+      hist.length?h("div",{},...hist.slice(0,6).map(i=>h("div",{class:"ev"},h("span",{class:"d"},dmy(i.data)+" · "),seloFila(i),["funcionamento","limpeza","qualidade"].map(k=>h("span",{class:"selo "+(i[k]?"vig":"bad")},k==="funcionamento"?"func":k.slice(0,4))),i.obs?h("div",{class:"d"},i.obs):null,fotoLinha("inspecoes_agua",i.id,{objeto_tipo:"estrutura",objeto_id:reg.id,rotulo:"Inspeção"})))):h("div",{class:"note"},"Sem inspeções."));
     corpo.push(regInspecao(reg.id));
   }
   if(reg&&reg.tipo==="cocho"){
@@ -1703,7 +1784,7 @@ function selEstrutura(id){selEstrId=id;selN=null;selLoteId=null;
       if(d7.length){const kg=d7.reduce((s,a)=>s+Number(a.quantidade_kg),0);
         corpo.push(h("dl",{class:"kv"},h("dt",{},"Consumo (7 dias)"),h("dd",{},nf(kg/7/cab,2)+" kg/cab/dia")));}}
     corpo.push(h("div",{class:"badge"},"Abastecimentos"),
-      hist.length?h("div",{},...hist.slice(0,6).map(a=>h("div",{class:"ev"},h("span",{class:"d"},dmy(a.data)+" · "),seloFila(a),a.alimento+(a.quantidade_kg?" · "+nf(a.quantidade_kg,0)+" kg":""),a.obs?h("div",{class:"d"},a.obs):null))):h("div",{class:"note"},"Sem abastecimentos."));
+      hist.length?h("div",{},...hist.slice(0,6).map(a=>h("div",{class:"ev"},h("span",{class:"d"},dmy(a.data)+" · "),seloFila(a),a.alimento+(a.quantidade_kg?" · "+nf(a.quantidade_kg,0)+" kg":""),a.obs?h("div",{class:"d"},a.obs):null,fotoLinha("abastecimentos_cocho",a.id,{objeto_tipo:"estrutura",objeto_id:reg.id,rotulo:"Abastecimento"})))):h("div",{class:"note"},"Sem abastecimentos."));
     corpo.push(regAbastecimento(reg.id));
   }
   if(reg&&reg.tipo==="estoque")estqFicha(reg,corpo);
@@ -1721,7 +1802,7 @@ function selEstrutura(id){selEstrId=id;selN=null;selLoteId=null;
     const hist=D.chuva.filter(c=>c.estrutura_id===reg.id).slice(0,5);
     corpo.push(h("div",{class:"badge"},"Últimas leituras"),
       hist.length?h("div",{},...hist.map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data).slice(0,5)+" · "),nf(c.mm,1)+" mm",seloFila(c),
-        h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null))):h("div",{class:"note"},"Sem leituras registradas."),
+        h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null,fotoLinhaChuva(c,{objeto_tipo:"estrutura",objeto_id:reg.id,rotulo:"Leitura"})))):h("div",{class:"note"},"Sem leituras registradas."),
       regChuva(reg.id),
       D.admin?posicaoPluvio(reg.id):null,
       h("button",{class:"btn sm",type:"button",onclick:()=>{clearSel();VIEW="chuvas";rerender();window.scrollTo(0,0);}},"Ver relatório de chuvas"));
@@ -2015,8 +2096,9 @@ function suLinhaMov(m){
     m.valor_rs!=null&&D.socio?"R$ "+nf(m.valor_rs,2):null,m.contraparte||null].filter(Boolean).join(" · ");
   const titulo=m.origem_tipo?cap(m.origem_tipo):m.tipo==="reclassificação"&&sai&&ent[0]?(sai.categoria!==ent[0].categoria?"Mudança de faixa":(sai.destino||null)!==(ent[0].destino||null)?"Mudança de destino":"Mudança de condição"):cap(m.tipo);
   return h("div",{class:"ev su-ev"+(m.status==="cancelado"?" su-canc":"")},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(m.data).slice(0,5)+" · "),h("b",{},titulo),suSeloSt(m.status,m),suAcoes(suBtnCancelar("suinos_movimentos",m))),
-    h("div",{},txt),fin?h("div",{class:"d"},fin):null,m.obs&&m.tipo!=="inventário"?h("div",{class:"d"},m.obs):null);
+    h("div",{},txt),fin?h("div",{class:"d"},fin):null,m.obs&&m.tipo!=="inventário"?h("div",{class:"d"},m.obs):null,fotoLinha("suinos_movimentos",m.id,suCtx("plantel")));
 }
+const suCtx=aba=>({objeto_tipo:"estrutura",objeto_id:suEstrId(),aba});
 
 /* formulário de movimento: saídas e mudanças usam um grupo do plantel; entradas descrevem o grupo que chega */
 function suFormMov(){
@@ -2123,7 +2205,7 @@ function suLinhaRepro(e){
     e.tipo==="parto"?[e.vivos_f!=null||e.vivos_m!=null?(e.vivos_f||0)+(e.vivos_m||0)+" vivos ("+(e.vivos_f||0)+" F · "+(e.vivos_m||0)+" M)":null,e.natimortos?e.natimortos+" natimortos":null,e.mumificados?e.mumificados+" mumificados":null].filter(Boolean).join(" · ")||null:
     e.tipo==="desmame"?[e.desmamados!=null?e.desmamados+" desmamados":null,e.peso_medio_kg?nf(e.peso_medio_kg,1)+" kg/cab":null].filter(Boolean).join(" · "):null;
   return h("div",{class:"ev su-ev"+(e.status==="cancelado"?" su-canc":"")},h("div",{class:"su-l1"},h("span",{class:"d"},dmy(e.data).slice(0,5)+" · "),h("b",{},cap(e.tipo)),suSeloSt(e.status,e),suAcoes(suBtnCancelar("suinos_reproducao",e))),
-    det?h("div",{},det):null,e.obs?h("div",{class:"d"},e.obs):null);
+    det?h("div",{},det):null,e.obs?h("div",{class:"d"},e.obs):null,fotoLinha("suinos_reproducao",e.id,suCtx("reproducao")));
 }
 function suBtnEditarRep(r){
   const b=h("button",{class:"btn sm su-ed",type:"button"},"Editar");
@@ -2207,7 +2289,7 @@ function suAbaPesagens(){
   if(hist.length)out.push(h("div",{class:"badge"},"Pesagens registradas"),h("div",{},...hist.map(p=>h("div",{class:"ev su-ev"+(p.status==="cancelado"?" su-canc":"")},
     h("div",{class:"su-l1"},h("span",{class:"d"},dmy(p.data).slice(0,5)+" · "),h("b",{},p.reprodutor_id?(suRep(p.reprodutor_id)?.identificacao||"—"):suBlocoNome(p.bloco_id).replace("Bloco ","B")+" · "+cap(p.categoria)),suSeloSt(p.status,p),suAcoes(suBtnCancelar("suinos_pesagens",p))),
     h("div",{},(p.reprodutor_id?"":suSexo(p)+" · ")+nf(p.peso_medio_kg,1)+" kg/cab"+(p.cabecas?" · "+p.cabecas+" cab":"")+" · "+p.metodo+(p.perimetro_cm?" ("+nf(p.perimetro_cm,0)+" × "+nf(p.comprimento_cm,0)+" cm)":"")),
-    p.obs&&p.metodo!=="estimativa por foto"?h("div",{class:"d"},p.obs):null))));
+    p.obs&&p.metodo!=="estimativa por foto"?h("div",{class:"d"},p.obs):null,fotoLinha("suinos_pesagens",p.id,suCtx("pesagens"))))));
   out.push(suFormPesagem());
   return out;
 }
@@ -2253,7 +2335,7 @@ function suAbaAlimentacao(){
   const hist=[...su().alim].sort(suDesc).slice(0,10);
   if(hist.length)out.push(h("div",{class:"badge"},"Fornecimentos registrados"),h("div",{},...hist.map(a=>h("div",{class:"ev su-ev"+(a.status==="cancelado"?" su-canc":"")},
     h("div",{class:"su-l1"},h("span",{class:"d"},dmy(a.data).slice(0,5)+" · "),h("b",{},suBlocoNome(a.bloco_id)),suSeloSt(a.status,a),suAcoes(suBtnCancelar("suinos_alimentacao",a))),
-    h("div",{},a.alimento+" · "+nf(a.quantidade_kg,1)+" kg"),a.obs?h("div",{class:"d"},a.obs):null))));
+    h("div",{},a.alimento+" · "+nf(a.quantidade_kg,1)+" kg"),a.obs?h("div",{class:"d"},a.obs):null,fotoLinha("suinos_alimentacao",a.id,suCtx("alimentacao"))))));
   out.push(suFormAlim());
   return out;
 }
@@ -2285,7 +2367,7 @@ function suLinhaSan(s,prog){
   const canc=suBtnCancelar("suinos_sanidade",s);
   return h("div",{class:"ev su-ev"+(s.status==="cancelado"?" su-canc":"")},
     h("div",{class:"su-l1"},h("span",{class:"d"},dmy(s.data).slice(0,5)+" · "),h("b",{},cap(s.tipo)+(s.produto?" — "+s.produto:"")),suSeloSt(s.status==="programado"?null:s.status,s),prog?null:suAcoes(canc)),
-    h("div",{},suAlvoTxt(s)+(s.dose?" · "+s.dose:"")),s.obs?h("div",{class:"d"},s.obs):null,
+    h("div",{},suAlvoTxt(s)+(s.dose?" · "+s.dose:"")),s.obs?h("div",{class:"d"},s.obs):null,fotoLinha("suinos_sanidade",s.id,suCtx("sanidade")),
     prog?h("div",{class:"su-acoes su-acoes-l"},feito,canc):null);
 }
 /* castração: inteiros do grupo passam a capados (o peso vai junto) */
@@ -2441,7 +2523,12 @@ document.addEventListener("focusout",()=>{if(FILA.rerenderPendente)setTimeout(()
 async function enviarItem(it){
   if(it.tipo==="foto_chuva")return enviarFotoChuva(it);
   if(it.tipo==="foto"){const b=filaBlob(it);if(!b)return{concluido:false,r:{resultado:"sem foto",motivo:"a foto não ficou guardada no celular"}};await subirBlob(it.meta.path,b,b.type||"image/jpeg");}
-  const r=await rpcGravar(it);
+  let r;
+  try{r=await rpcGravar(it);}
+  catch(e){const l=it.tipo==="foto"&&it.passos&&it.passos[0]&&it.passos[0].linha;
+    if(l&&l.apontamento_tabela&&/apontamento_(tabela|id)|does not exist/i.test(String(e?.message||e))){   /* banco ainda sem db/36 */
+      delete l.apontamento_tabela;delete l.apontamento_id;await filaPersistir(it);r=await rpcGravar(it);console.warn("fotos: banco sem o vínculo ao apontamento (db/36) — foto gravada solta");}
+    else throw e;}
   return{concluido:true,r};
 }
 async function rpcGravar(it){
@@ -2818,7 +2905,8 @@ function viewChuvas(main){
   const linhasMes=Object.keys(meses).sort().reverse().map(m=>h("tr",{},h("td",{},nomeMes(m)),
     ...ps.map(p=>{const o=meses[m][p.id];return h("td",{class:"n",style:"white-space:normal"},o?[nf(o.mm,1)+" mm",h("div",{style:"font-size:11px;color:var(--muted)"},o.dias+" dias · máx "+nf(o.max,1))]:"—");})));
   const recentes=D.chuva.slice(0,5).map(c=>h("div",{class:"ev"},h("span",{class:"d"},dmy(c.data).slice(0,5)+" · "),
-    nomeCurto(D.estr.find(e=>e.id===c.estrutura_id))+" · "+nf(c.mm,1)+" mm",seloFila(c),h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null));
+    nomeCurto(D.estr.find(e=>e.id===c.estrutura_id))+" · "+nf(c.mm,1)+" mm",seloFila(c),h("span",{class:"d"}," · "+(c.autor_email||"").split("@")[0]),c.origem==="foto"?h("span",{class:"d"}," · foto"):null,c.obs?h("div",{class:"d"},c.obs):null,
+    fotoLinhaChuva(c,{objeto_tipo:"estrutura",objeto_id:c.estrutura_id,rotulo:"Leitura"})));
   /* leituras pela foto — todas as tentativas, para o administrador ver o que houve (foto, distância, motivo) */
   const hm=iso=>{const d=new Date(iso);return dmy(isoDia(d)).slice(0,5)+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
   const tent=D.admin?D.tentChuva.slice(0,10).map(t=>{
