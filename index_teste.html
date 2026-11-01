@@ -801,9 +801,11 @@ function fotoStrip(tipo,id,aba){
   const inp=h("input",{type:"file",accept:"image/*",hidden:true});
   inp.addEventListener("change",async()=>{const file=inp.files[0];if(!file)return;
     btn.textContent="Enviando…";btn.disabled=true;
-    try{const path=`${tipo}/${id}/${aba||"geral"}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_")}`;
+    try{const path=`${tipo}/${id}/${aba||"geral"}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_").replace(/\.[A-Za-z]+$/,"")}.jpg`;
+      const blob=await reduzirFoto(file,2000).catch(()=>file);
+      const foto=await blob.arrayBuffer();if(!foto.byteLength)throw new Error("a foto veio vazia — tire outra");
       const it={id:uuid4(),tipo:"foto",quando:new Date().toISOString(),resumo:"Foto · "+(tipo==="pasto"?(D.pastos.find(p=>p.id===id)?.nome||"pasto"):(D.estr.find(e=>e.id===id)?.nome||"estrutura")),
-        estado:"aguardando",tentativas:0,autor:D.email||null,blob:file,meta:{path},passos:[{op:"insert",tabela:"fotos",linha:{objeto_tipo:tipo,objeto_id:id,aba:aba||null,path,autor_email:D.email}}]};
+        estado:"aguardando",tentativas:0,autor:D.email||null,foto,fotoTipo:blob.type||"image/jpeg",meta:{path,objeto_tipo:tipo,objeto_id:id,aba:aba||null},passos:[{op:"insert",tabela:"fotos",linha:{objeto_tipo:tipo,objeto_id:id,aba:aba||null,path,autor_email:D.email}}]};
       await filaAdicionar(it);const r=await esperarEnvio(it);
       if(r.fila){rerenderAposGravar();return;}
       await carregar();rerender();
@@ -2357,8 +2359,26 @@ async function filaCarregar(){const r=await filaOp("readonly",st=>st.getAll()).c
 async function filaAdicionar(it){FILA.itens.push(it);FILA.itens.sort((a,b)=>a.quando<b.quando?-1:1);await filaPersistir(it);aplicarFila();filaSelo();}
 async function filaRemover(id){FILA.itens=FILA.itens.filter(i=>i.id!==id);delete FILA.esperas[id];await filaOp("readwrite",st=>st.delete(id)).catch(()=>null);aplicarFila();filaSelo();}
 const filaItens=()=>FILA.itens;
-const filaPendentes=()=>FILA.itens.filter(i=>i.estado==="aguardando"||i.estado==="enviando");
-const filaAtencao=()=>FILA.itens.filter(i=>i.estado==="erro"||i.estado==="atencao");
+/* "erro" com nova tentativa marcada (it.proxima) é falha passageira: a fila insiste sozinha; sem it.proxima é recusa
+   definitiva ou esgotada — aí espera uma pessoa. "atencao" = o servidor julgou (foto não lida, longe, sem foto…). */
+const filaAutoRetentar=i=>i.estado==="erro"&&typeof i.proxima==="number";
+const filaPendentes=()=>FILA.itens.filter(i=>i.estado==="aguardando"||i.estado==="enviando"||filaAutoRetentar(i));
+const filaAtencao=()=>FILA.itens.filter(i=>(i.estado==="erro"&&!filaAutoRetentar(i))||i.estado==="atencao");
+const FILA_ESPERAS_MIN=[1,3,10,30,60];                                   /* minutos até a próxima tentativa automática */
+const filaErroDefinitivo=m=>/duplicate|unique|row-level|permission|violates|not-null|invalid input|Tabela não permitida|Função não permitida|Usuário sem acesso|não permitida/i.test(m||"");
+/* a foto guardada na fila (bytes brutos; itens antigos ainda podem trazer um Blob) */
+const filaBlob=it=>it.foto&&it.foto.byteLength?new Blob([it.foto],{type:it.fotoTipo||"image/jpeg"}):(it.blob&&it.blob.size?it.blob:null);
+/* diagnóstico: cada falha fica anotada e sobe ao banco (app_fila_eventos) na primeira oportunidade — sem a foto */
+const FILA_DIAG="zk_fila_diag_"+SUPA_URL.replace("https://","").split(".")[0];
+function filaDiag(it,evento,extra){try{const b=JSON.parse(localStorage.getItem(FILA_DIAG)||"[]");
+  b.push({quando:new Date().toISOString(),item_id:it.id,tipo:it.tipo,resumo:it.resumo||null,evento,estado:it.estado,tentativas:it.tentativas||0,erro:it.erro||null,
+    detalhe:Object.assign({},it.resultado?{resultado:it.resultado}:{},it.meta?{meta:Object.fromEntries(Object.entries(it.meta).filter(([k])=>!/blob|foto/.test(k)))}:{},extra||{}),
+    cliente:navigator.userAgent.slice(0,160),autor_email:D.email||it.autor||null});
+  localStorage.setItem(FILA_DIAG,JSON.stringify(b.slice(-50)));}catch(e){}}
+async function filaDiagEnviar(){let b;try{b=JSON.parse(localStorage.getItem(FILA_DIAG)||"[]");}catch(e){return;}
+  if(!b.length||!navigator.onLine||!D.email)return;
+  try{const{error}=await sb.from("app_fila_eventos").insert(b.map(x=>({quando:x.quando,item_id:x.item_id,tipo:x.tipo,resumo:x.resumo,evento:x.evento,estado:x.estado,tentativas:x.tentativas,erro:x.erro,detalhe:x.detalhe,cliente:x.cliente,autor_email:x.autor_email})));
+    if(!error)localStorage.removeItem(FILA_DIAG);}catch(e){}}
 
 /* --- tempo limite: sem resposta, tratamos como sem conexão (o reenvio é seguro: o lote tem número único) --- */
 const comLimite=(p,ms)=>new Promise((ok,err)=>{const t=setTimeout(()=>err(new Error("Tempo esgotado (sem conexão?)")),ms);p.then(v=>{clearTimeout(t);ok(v);},e=>{clearTimeout(t);err(e);});});
@@ -2379,28 +2399,34 @@ async function enviarFila(){
   if(FILA.rodando)return;FILA.rodando=true;let mudou=false,parouSemRede=false;   /* mudou = algo gravado em segundo plano (sem ninguém esperando) */
   try{
     for(const it of [...FILA.itens]){
-      if(it.estado!=="aguardando")continue;
+      if(!(it.estado==="aguardando"||(filaAutoRetentar(it)&&(Date.now()>=it.proxima||FILA.esperas[it.id]))))continue;
       it.estado="enviando";filaSelo();
       try{
         const r=await enviarItem(it);
         it.tentativas=(it.tentativas||0)+1;
         const w=FILA.esperas[it.id];delete FILA.esperas[it.id];
         if(r.concluido){await filaRemover(it.id);if(!w)mudou=true;}
-        else{it.estado="atencao";it.resultado=r.r;it.erro=null;await filaPersistir(it);if(!w)mudou=true;}
+        else{it.estado="atencao";it.resultado=r.r;it.erro=null;it.proxima=null;await filaPersistir(it);filaDiag(it,"servidor julgou");if(!w)mudou=true;}
         FILA.offline=false;
         if(w)w.ok(r.r?{ok:true,r:r.r}:{ok:true});
       }catch(e){
         if(semRede(e)){it.estado="aguardando";FILA.offline=true;parouSemRede=true;await filaPersistir(it);break;}
         it.tentativas=(it.tentativas||0)+1;it.erro=String(e?.message||e);
         const w=FILA.esperas[it.id];delete FILA.esperas[it.id];
-        if(w&&w.interativo){await filaRemover(it.id);w.err(new Error(it.erro));}
-        else{it.estado="erro";await filaPersistir(it);if(!w)mudou=true;}
+        const definitivo=filaErroDefinitivo(it.erro);
+        if(w&&w.interativo&&definitivo){await filaRemover(it.id);w.err(new Error(it.erro));}   /* recusa definitiva com alguém esperando: o usuário corrige */
+        else{it.estado="erro";
+          /* falha passageira (servidor indisponível, resposta estranha): a fila volta sozinha, com espera crescente; recusa definitiva espera uma pessoa */
+          const n=(it.falhas||0)+1;it.falhas=n;
+          it.proxima=(!definitivo&&n<=FILA_ESPERAS_MIN.length)?Date.now()+FILA_ESPERAS_MIN[n-1]*60000:null;
+          await filaPersistir(it);filaDiag(it,it.proxima?"falha — nova tentativa marcada":"recusado");
+          if(w)w.ok({fila:true,retentar:!!it.proxima,erro:it.erro});else mudou=true;}
       }
     }
     if(parouSemRede){for(const id of Object.keys(FILA.esperas)){const w=FILA.esperas[id];delete FILA.esperas[id];w.ok({fila:true});}}
   }finally{FILA.rodando=false;filaSelo();
     if(mudou){try{await carregar();}catch(e){}rerenderSeguro();}
-    aplicarFila();}
+    aplicarFila();if(!parouSemRede)filaDiagEnviar();}
 }
 /* não refaz a tela enquanto o usuário está digitando num formulário */
 /* depois de o usuário mandar gravar, a tela é refeita de imediato (o foco que sobrou no campo não segura) */
@@ -2414,7 +2440,7 @@ document.addEventListener("focusout",()=>{if(FILA.rerenderPendente)setTimeout(()
 
 async function enviarItem(it){
   if(it.tipo==="foto_chuva")return enviarFotoChuva(it);
-  if(it.tipo==="foto"){await subirBlob(it.meta.path,it.blob,it.blob?.type||"image/jpeg");}
+  if(it.tipo==="foto"){const b=filaBlob(it);if(!b)return{concluido:false,r:{resultado:"sem foto",motivo:"a foto não ficou guardada no celular"}};await subirBlob(it.meta.path,b,b.type||"image/jpeg");}
   const r=await rpcGravar(it);
   return{concluido:true,r};
 }
@@ -2444,7 +2470,7 @@ async function subirBlob(path,blob,tipo){
 }
 async function enviarFotoChuva(it){
   const m=it.meta;
-  if(!m.enviada){await subirBlob(m.path,it.blob,"image/jpeg");m.enviada=true;await filaPersistir(it);}
+  if(!m.enviada){const b=filaBlob(it);if(!b)return{concluido:false,r:{resultado:"sem foto",motivo:"a foto não ficou guardada no celular"}};await subirBlob(m.path,b,"image/jpeg");m.enviada=true;await filaPersistir(it);}
   const r=await chamarLeitura({estrutura_id:m.eid,foto_path:m.path,lat:m.lat,lon:m.lon,precisao_m:m.prec,capturado_em:m.capturado_em});
   if(r.resultado==="lida"){
     const nome=nomeCurto(D.estr.find(e=>e.id===m.eid));
@@ -2462,11 +2488,11 @@ function aplicarFila(){
   if(!D||!Array.isArray(D.pastos))return;
   for(const t of Object.keys(FILA_MAPA)){const a=filaAlvo(t);if(!a)continue;a.obj[a.k]=a.obj[a.k].filter(r=>!r._fila);a.obj[a.k].forEach(r=>{if(r._filaUpd)delete r._filaUpd;});}
   for(const it of FILA.itens){
-    if(it.estado==="erro")continue;
+    if(it.estado==="erro"&&!filaAutoRetentar(it))continue;
     const passos=it.tipo==="lote"||it.tipo==="foto"?it.passos:[];
     passos.forEach((p,i)=>{const a=filaAlvo(p.tabela);if(!a)return;
       if(p.op==="insert"){const r={..._defaultsFila(p.tabela),...p.linha,_fila:it.id};if(!r.id)r.id="fila-"+it.id+"-"+i;if(!r.criado_em)r.criado_em=it.quando;
-        if(p.tabela==="fotos"&&it.blob)r._blob=it.blob;a.obj[a.k].push(r);}
+        if(p.tabela==="fotos"){const b=filaBlob(it);if(b)r._blob=b;}a.obj[a.k].push(r);}
       else if(p.op==="update"){a.obj[a.k].forEach(r=>{if(Object.entries(p.chave).every(([k,v])=>r[k]===v)){Object.assign(r,p.valores);r._filaUpd=it.id;}});}});
   }
   for(const k of ORDENA_DATA)if(Array.isArray(D[k]))D[k].sort((a,b)=>a.data<b.data?1:a.data>b.data?-1:((a.criado_em||"")<(b.criado_em||"")?1:-1));
@@ -2481,7 +2507,7 @@ function semFila(obj){const c={...obj};
     else if(Array.isArray(c[m[0]]))c[m[0]]=c[m[0]].filter(r=>!r._fila);}
   return c;}
 /* dias com foto de chuva guardada e ainda não lida não contam como "leitura pendente" */
-const filaFotoChuvaDias=eid=>new Set(FILA.itens.filter(i=>i.tipo==="foto_chuva"&&i.estado!=="erro"&&i.meta.eid===eid).map(i=>i.meta.data));
+const filaFotoChuvaDias=eid=>new Set(FILA.itens.filter(i=>i.tipo==="foto_chuva"&&(i.estado!=="erro"||filaAutoRetentar(i))&&i.meta.eid===eid).map(i=>i.meta.data));
 
 /* --- selo no topo e painel da fila --- */
 function filaSelo(){const el=document.getElementById("fila-selo");if(!el)return;
@@ -2498,25 +2524,39 @@ function abrirFila(){
   const ov=h("div",{class:"fotofull fila-painel",style:"cursor:default"},h("div",{class:"fila-card"},
     h("div",{class:"su-l1"},h("b",{},"Apontamentos a enviar"),suAcoes(h("button",{class:"btn sm",type:"button",onclick:fechar},"Fechar"))),
     h("div",{class:"note"},"Feitos sem conexão ficam guardados neste celular e sobem sozinhos quando a rede voltar, na ordem em que foram feitos."),lista));
+  /* abre a ficha de onde o apontamento nasceu, para refazer a foto */
+  const irAoAlvo=it=>{fechar();clearSel();
+    if(it.tipo==="foto_chuva"){const e=D.estr.find(x=>x.id===it.meta.eid);const m=e&&mapIdByNome(e.nome);if(m){VIEW="mapa";rerender();selEstrutura(m);}else{VIEW="chuvas";rerender();}window.scrollTo(0,0);return;}
+    const m=it.meta||{};VIEW="mapa";rerender();
+    if(m.objeto_tipo==="pasto"){const p=D.pastos.find(x=>x.id===m.objeto_id);if(p)selPasto(p.numero,m.aba||undefined);}
+    else{const e=D.estr.find(x=>x.id===m.objeto_id);const id=e&&mapIdByNome(e.nome);if(id){if(m.aba)suTab=m.aba;selEstrutura(id);}}
+    window.scrollTo(0,0);};
   const desenhar=()=>{lista.replaceChildren(...(FILA.itens.length?FILA.itens.map(it=>{
-    const st=it.estado==="aguardando"?h("span",{class:"selo prog"},"A enviar"):it.estado==="enviando"?h("span",{class:"selo vig"},"Enviando…"):it.estado==="erro"?h("span",{class:"selo bad"},"Recusado"):h("span",{class:"selo bad"},"Atenção");
-    const acoes=[];
+    const auto=filaAutoRetentar(it);
+    const st=it.estado==="aguardando"?h("span",{class:"selo prog"},"A enviar"):it.estado==="enviando"?h("span",{class:"selo vig"},"Enviando…"):auto?h("span",{class:"selo prog"},"Nova tentativa"):it.estado==="erro"?h("span",{class:"selo bad"},"Recusado"):h("span",{class:"selo bad"},"Atenção");
+    const acoes=[];const r=it.resultado||{};const semFoto=it.estado==="atencao"&&r.resultado==="sem foto";
     if(it.estado==="aguardando")acoes.push(h("button",{class:"btn sm",type:"button",onclick:()=>{enviarFila();}},"Enviar agora"));
-    if(it.estado==="erro")acoes.push(h("button",{class:"btn sm",type:"button",onclick:async()=>{it.estado="aguardando";await filaPersistir(it);enviarFila();desenhar();}},"Tentar de novo"));
-    if(it.tipo==="foto_chuva"&&it.estado==="atencao"){const r=it.resultado||{};
+    if(it.estado==="erro")acoes.push(h("button",{class:"btn sm",type:"button",onclick:async()=>{it.estado="aguardando";it.proxima=null;await filaPersistir(it);enviarFila();desenhar();}},auto?"Tentar agora":"Tentar de novo"));
+    if(it.tipo==="foto_chuva"&&it.estado==="atencao"){
       if(r.resultado==="existe")acoes.push(h("button",{class:"btn pri sm",type:"button",onclick:async e=>{const b=e.currentTarget;b.disabled=true;
         try{const r2=await chamarLeitura({acao:"confirmar",tentativa_id:r.tentativa_id});if(r2.resultado==="lida"){await filaRemover(it.id);await carregar().catch(()=>{});rerenderSeguro();desenhar();}else{b.disabled=false;b.textContent=frase(r2.motivo||"não gravou");}}catch(e2){b.disabled=false;b.textContent="Sem conexão";}}},"Substituir por "+nf(r.mm,1)+" mm"));
-      else acoes.push(h("button",{class:"btn pri sm",type:"button",onclick:()=>{fechar();FLASH_MANUAL={eid:it.meta.eid,data:it.meta.data};clearSel();VIEW="chuvas";rerender();window.scrollTo(0,0);}},"Lançar manualmente"));}
+      else{acoes.push(h("button",{class:"btn pri sm",type:"button",onclick:()=>irAoAlvo(it)},"Tirar outra foto"));
+        acoes.push(h("button",{class:"btn sm",type:"button",onclick:()=>{fechar();FLASH_MANUAL={eid:it.meta.eid,data:it.meta.data};clearSel();VIEW="chuvas";rerender();window.scrollTo(0,0);}},"Lançar manualmente"));}}
+    if(it.tipo==="foto"&&semFoto)acoes.push(h("button",{class:"btn pri sm",type:"button",onclick:()=>irAoAlvo(it)},"Tirar outra foto"));
     acoes.push(h("button",{class:"btn sm su-x",type:"button",onclick:async e=>{const b=e.currentTarget;if(b.dataset.c!=="1"){b.dataset.c="1";b.textContent="Confirmar descarte";b.classList.add("bad");return;}
       await filaRemover(it.id);rerenderSeguro();desenhar();}},"Descartar"));
-    const det=it.estado==="erro"?"O banco recusou: "+filaErroTxt(it.erro):it.estado==="atencao"&&it.resultado?(it.resultado.resultado==="existe"?"Já existe leitura em "+dmy(it.resultado.data)+" ("+nf(it.resultado.existente_mm,1)+" mm); a foto leu "+nf(it.resultado.mm,1)+" mm.":
-      ({"não lida":"A foto não permitiu a leitura","fora do ponto":"Foto longe do pluviômetro","sem localização":"Sem localização do celular"}[it.resultado.resultado]||"Leitura indisponível")+(it.resultado.motivo?" — "+frase(it.resultado.motivo):"")+". Lance o valor manualmente na data da foto."):null;
+    const hm=t=>{const d=new Date(t);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
+    const det=auto?"Falhou "+(it.falhas||1)+"× — "+filaErroTxt(it.erro)+" Nova tentativa automática às "+hm(it.proxima)+"; pode tentar agora."
+      :it.estado==="erro"?"O banco recusou: "+filaErroTxt(it.erro)
+      :it.estado==="atencao"&&it.resultado?(r.resultado==="existe"?"Já existe leitura em "+dmy(r.data)+" ("+nf(r.existente_mm,1)+" mm); a foto leu "+nf(r.mm,1)+" mm."
+        :semFoto?"A foto não ficou guardada no celular (o iPhone pode esvaziar uma foto guardada quando o app fecha)."+(it.tipo==="foto_chuva"?" Tire outra no pluviômetro; se não der, lance o valor.":" Tire outra.")
+        :({"não lida":"A foto não permitiu a leitura","fora do ponto":"Foto longe do pluviômetro","sem localização":"Sem localização do celular"}[r.resultado]||"Leitura indisponível")+(r.motivo?" — "+frase(r.motivo):"")+". Tire outra foto junto do pluviômetro; se não der, lance o valor na data da foto."):null;
     return h("div",{class:"ev su-ev"},h("div",{class:"su-l1"},h("span",{class:"d"},hmFila(it.quando)+" · "),h("b",{},it.resumo||it.tipo),st),
       det?h("div",{class:"d"},det):null,h("div",{class:"su-acoes su-acoes-l"},...acoes));}):[h("div",{class:"note"},"Nada a enviar.")]));};
   desenhar();document.body.append(ov);
 }
 let FLASH_MANUAL=null;
-const filaErroTxt=m=>/leituras_chuva_estrutura_id_data|duplicate key/i.test(m||"")?"já existe leitura desse pluviômetro nesse dia (lançada enquanto você estava sem conexão). Confira na tela de Chuvas e descarte este envio.":
+const filaErroTxt=m=>/no content provided|veio vazia/i.test(m||"")?"a foto não ficou guardada no celular — tire outra foto.":/leituras_chuva_estrutura_id_data|duplicate key/i.test(m||"")?"já existe leitura desse pluviômetro nesse dia (lançada enquanto você estava sem conexão). Confira na tela de Chuvas e descarte este envio.":
   /row-level security|permission denied/i.test(m||"")?"seu usuário não tem permissão para este lançamento.":/not-null|violates check/i.test(m||"")?"dados incompletos ou inválidos ("+m+").":m;
 
 /* alerta de leitura pendente da tela: refeito sem redesenhar a ficha (a foto guardada já conta) */
@@ -2527,6 +2567,7 @@ function atualizarAlertaChuva(eid){for(const raiz of ["#panel","#main"]){const r
 addEventListener("online",()=>{FILA.offline=false;filaSelo();enviarFila();});
 addEventListener("offline",()=>{FILA.offline=true;filaSelo();});
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")enviarFila();});
+addEventListener("pageshow",()=>{if(navigator.onLine)enviarFila();});
 setInterval(()=>{if(filaPendentes().length&&navigator.onLine)enviarFila();},90000);
 
 /* ---------- GPS: posição presa ao instante da foto ----------
@@ -2569,8 +2610,9 @@ async function enfileirarFotoChuva({eid,blob,pos,capt}){
   const capturado_em=new Date(capt).toISOString();
   const data=isoDia(new Date(capt));
   const id=uuid4();const nome=nomeCurto(D.estr.find(e=>e.id===eid));
-  const it={id,tipo:"foto_chuva",quando:new Date().toISOString(),resumo:"Foto do pluviômetro "+nome+" · "+dmy(data).slice(0,5),estado:"aguardando",tentativas:0,autor:D.email||null,blob,
-    meta:{eid,lat:pos.lat,lon:pos.lon,prec:pos.prec??null,capturado_em,data,path:"chuva/"+eid+"/"+data+"_"+id+".jpg",enviada:false}};
+  const foto=await blob.arrayBuffer();
+  const it={id,tipo:"foto_chuva",quando:new Date().toISOString(),resumo:"Foto do pluviômetro "+nome+" · "+dmy(data).slice(0,5),estado:"aguardando",tentativas:0,autor:D.email||null,foto,fotoTipo:"image/jpeg",
+    meta:{eid,lat:pos?.lat??null,lon:pos?.lon??null,prec:pos?.prec??null,capturado_em,data,path:"chuva/"+eid+"/"+data+"_"+id+".jpg",enviada:false}};
   await filaAdicionar(it);
   const r=await esperarEnvio(it);
   return{...r,item:it};
@@ -2652,7 +2694,6 @@ function regChuva(eidFixo){
   if(FLASH_CHUVA&&Date.now()-FLASH_CHUVA.t<20000&&(!eidFixo||FLASH_CHUVA.eid===eidFixo))aviso("ok","Leitura gravada",FLASH_CHUVA.linhas);
   if(FLASH_MANUAL&&(!eidFixo||FLASH_MANUAL.eid===eidFixo)){if(sel)sel.value=FLASH_MANUAL.eid;data.value=FLASH_MANUAL.data;
     aviso("","Lance o valor da foto de "+dmy(FLASH_MANUAL.data),["Pluviômetro "+nomeCurto(D.estr.find(e=>e.id===FLASH_MANUAL.eid))+" · informe a chuva em mm abaixo."]);FLASH_MANUAL=null;setTimeout(()=>{try{mm.focus({preventScroll:true});}catch(e){}},50);}
-  const pedirManual=()=>{data.value=hojeIso();mm.value="";try{mm.focus({preventScroll:true});}catch(e){}};
   const posFoto=async eid=>{await carregar();rerender();if(eidFixo)selEstrutura((MAP.estruturas||[]).find(s=>s.nome===D.estr.find(e=>e.id===eid)?.nome)?.id);};
   const tratar=async(r,eid,item)=>{
     if(r.resultado==="lida"){if(!FLASH_CHUVA||Date.now()-FLASH_CHUVA.t>5000)FLASH_CHUVA={t:Date.now(),eid,linhas:[nomeCurto(D.estr.find(e=>e.id===eid))+" · "+dmy(r.data)+" · "+nf(r.mm,1)+" mm · lido da foto"+(r.distancia_m!=null?" a "+nf(r.distancia_m,0)+" m do pluviômetro":""),"Esvazie o pluviômetro."]};
@@ -2661,10 +2702,12 @@ function regChuva(eidFixo){
       const sub=h("button",{class:"btn pri sm",type:"button",onclick:async()=>{sub.disabled=true;sub.textContent="Gravando…";
         try{await tratar(await chamarLeitura({acao:"confirmar",tentativa_id:r.tentativa_id}),eid,item);}catch(e){aviso("bad","Não gravou",[semRede(e)?"Sem conexão — a foto segue guardada; confirme pelo selo de pendências no topo.":String(e?.message||e)]);}}},"Substituir por "+nf(r.mm,1)+" mm");
       aviso("","Já existe leitura em "+dmy(r.data),["Registrada: "+nf(r.existente_mm,1)+" mm"+(r.existente_origem==="foto"?" (foto)":"")+" · a foto leu "+nf(r.mm,1)+" mm."],[sub]);return;}
-    const tit={"não lida":"A foto não permitiu a leitura","fora do ponto":"Foto longe do pluviômetro","sem localização":"Sem localização do celular"}[r.resultado]||"Leitura pela foto indisponível";
+    const tit={"não lida":"A foto não permitiu a leitura","fora do ponto":"Foto longe do pluviômetro","sem localização":"Sem localização do celular","sem foto":"A foto não ficou guardada"}[r.resultado]||"Leitura pela foto indisponível";
     const det=r.resultado==="fora do ponto"?"A "+nf(r.distancia_m,0)+" m do pluviômetro — o limite é "+nf(r.limite_m||100,0)+" m."
-      :r.resultado==="sem localização"?"Permita a localização para o app no celular.":frase(r.motivo)+".";
-    aviso("bad",tit,[det,"Lance o valor manualmente abaixo."]);pedirManual();};
+      :r.resultado==="sem localização"?"O celular não informou a posição — permita a localização para o app.":frase(r.motivo)+".";
+    /* o servidor já julgou esta foto: primeiro tentar resolver (outra foto); o lançamento manual é a última alternativa */
+    aviso("bad",tit,[det,"Tente outra foto, de frente para a escala e junto do pluviômetro. Se ainda assim não ler, lance o valor manualmente abaixo."],
+      [h("button",{class:"btn pri sm",type:"button",onclick:()=>btnFoto&&btnFoto.click()},"Tirar outra foto")]);};
   /* a foto é tirada pela câmera, na hora; a posição e a hora da captura ficam presas à foto (fila de envio) */
   const cam=h("input",{type:"file",accept:"image/*",capture:"environment",hidden:true});
   let t0=0;
@@ -2672,23 +2715,25 @@ function regChuva(eidFixo){
     if(!(eidFixo||sel?.value)){msg.textContent="Escolha o pluviômetro.";return;}
     gpsIniciar();t0=Date.now();cam.value="";cam.click();}},"Ler pela foto"):null;
   const hmCapt=t=>{const d=new Date(t);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
-  const enviarFoto=async(eid,blob,capt)=>{
+  const enviarFoto=async(eid,blob,capt,semPos)=>{
     res.replaceChildren(h("div",{class:"note"},"Obtendo a posição do GPS…"));
-    const pos=await gpsEsperar(capt,25000);
-    if(!pos){aviso("bad","Sem localização do celular",["O GPS não informou a posição. Fique ao ar livre, confira se a localização está permitida para o app e tente de novo."],
-      [h("button",{class:"btn pri sm",type:"button",onclick:e=>{e.currentTarget.disabled=true;enviarFoto(eid,blob,capt);}},"Tentar de novo")]);return;}
+    const pos=semPos?null:await gpsEsperar(capt,25000);
+    if(!pos&&!semPos){aviso("bad","Sem localização do celular",["O GPS não informou a posição. Fique ao ar livre, confira se a localização está permitida para o app e tente de novo."],
+      [h("button",{class:"btn pri sm",type:"button",onclick:e=>{e.currentTarget.disabled=true;enviarFoto(eid,blob,capt);}},"Tentar de novo"),
+       h("button",{class:"btn sm",type:"button",onclick:e=>{e.currentTarget.disabled=true;enviarFoto(eid,blob,capt,true);}},"Enviar sem posição")]);return;}
     const r=await enfileirarFotoChuva({eid,blob,pos,capt});
-    if(r.fila){aviso("ok","Foto guardada no celular",[nomeCurto(D.estr.find(e=>e.id===eid))+" · "+dmy(isoDia(new Date(capt)))+" · posição a "+nf(pos.prec??0,0)+" m de precisão.","Será lida quando a conexão voltar. Pode seguir normalmente."]);atualizarAlertaChuva(eid);return;}
+    if(r.fila){aviso("ok","Foto guardada no celular",[nomeCurto(D.estr.find(e=>e.id===eid))+" · "+dmy(isoDia(new Date(capt)))+(pos?" · posição a "+nf(pos.prec??0,0)+" m de precisão.":" · sem posição."),"Será lida quando a conexão voltar. Pode seguir normalmente."]);atualizarAlertaChuva(eid);return;}
     await tratar(r.r,eid,r.item);
   };
   cam.addEventListener("change",async()=>{const f=cam.files&&cam.files[0];if(!f)return;
     const eid=eidFixo||sel.value;
     btnFoto.disabled=true;btnFoto.textContent="Lendo a foto…";res.replaceChildren(h("div",{class:"note"},"Preparando a foto…"));
     try{const capt=await instanteCaptura(f,t0);
-      if(capt<t0-120000){aviso("bad","Foto tirada antes",["Esta foto é das "+hmCapt(capt)+", antes de você tocar em Ler pela foto — a posição dela não é conhecida.","Tire a foto pelo app, junto do pluviômetro, ou lance o valor manualmente abaixo."]);pedirManual();return;}
+      if(capt<t0-120000){aviso("bad","Foto tirada antes",["Esta foto é das "+hmCapt(capt)+", antes de você tocar em Ler pela foto — a posição dela não é conhecida.","Tire a foto pelo app, agora, junto do pluviômetro."],
+        [h("button",{class:"btn pri sm",type:"button",onclick:()=>btnFoto.click()},"Tirar a foto agora")]);return;}
       const blob=await reduzirFoto(f,1600);
       await enviarFoto(eid,blob,capt);
-    }catch(e){aviso("bad","Leitura pela foto indisponível",[String(e?.message||e),"Lance o valor manualmente abaixo."]);pedirManual();}
+    }catch(e){aviso("bad","Leitura pela foto indisponível",[String(e?.message||e)],[h("button",{class:"btn pri sm",type:"button",onclick:()=>btnFoto.click()},"Tentar de novo")]);}
     finally{if(btnFoto.isConnected){btnFoto.disabled=false;btnFoto.textContent="Ler pela foto";}}});
   const gravar=async(substituir)=>{
     const eid=eidFixo||sel.value;
