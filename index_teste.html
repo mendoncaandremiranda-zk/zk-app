@@ -3739,26 +3739,34 @@ function viewRelatorios(main){
     h("p",{class:"note",style:"margin-top:8px"},"Uma posição por data-base, gerada a cada atualização do modelo e toda segunda-feira. A vigente fica em destaque; a pasta guarda as 3 anteriores — as mais antigas saem da exibição, mas permanecem registradas no banco."),
     h("div",{class:"badge",style:"margin-top:14px"},"Modelo de gestão — planilha"),
     bloco(mod,"Versões anteriores","A planilha ainda não foi anexada ao banco — o Mac anexa na próxima atualização do modelo."),
-    h("p",{class:"note",style:"margin-top:8px"},"A planilha completa do modelo (Gestao_Agropecuaria_Dois_Amigos.xlsx) como ficou na última atualização — valores recalculados, abre no Excel ou no Numbers. Uma versão por data-base; a vigente é a mais recente.")));
+    h("p",{class:"note",style:"margin-top:8px"},"A planilha completa do modelo (Gestao_Agropecuaria_Dois_Amigos.xlsx) como ficou na última atualização, com os valores recalculados. Abrir mostra a pré-visualização do aparelho (no iPhone, com a opção de abrir no Numbers ou no Excel); Baixar guarda o arquivo. Uma versão por data-base; a vigente é a mais recente.")));
 }
 
 function relLinha(r,vigente){
   let abrir;
   const ehImg=p=>/\.(png|jpe?g|gif|webp)$/i.test(p||"");
-  const ehArquivo=p=>/\.(xlsx|xlsm|csv|pdf|docx)$/i.test(p||"");                     /* não abre no navegador: baixa */
+  const ehArquivo=p=>/\.(xlsx|xlsm|csv|pdf|docx)$/i.test(p||"");   /* planilha/documento: Abrir (pré-visualização do aparelho) e Baixar */
+  let baixarBt=null;
   if(r.storage_path){
-    const baixar=ehArquivo(r.storage_path);
-    abrir=h("button",{class:"btn pri sm",type:"button"},baixar?"Baixar":"Abrir");
+    const arquivo=ehArquivo(r.storage_path),nome=r.storage_path.split("/").pop();
+    abrir=h("button",{class:"btn pri sm",type:"button"},"Abrir");
     abrir.addEventListener("click",()=>{
-      const w=ehImg(r.storage_path)||baixar?null:window.open("about:blank","_blank");
-      const nome=r.storage_path.split("/").pop();
-      sb.storage.from("fotos").createSignedUrl(r.storage_path,3600,baixar?{download:nome}:undefined).then(({data,error})=>{
+      const w=ehImg(r.storage_path)?null:window.open("about:blank","_blank");
+      sb.storage.from("fotos").createSignedUrl(r.storage_path,3600).then(({data,error})=>{
         if(error){if(w)w.close();abrir.textContent="Falhou: "+error.message;return;}
         if(ehImg(r.storage_path))abrirViewer(data.signedUrl,r.titulo||"Relatório");
-        else if(baixar){const a=h("a",{href:data.signedUrl,download:nome,hidden:true});document.body.append(a);a.click();a.remove();}
         else if(w)w.location=data.signedUrl;else location.href=data.signedUrl;
       });
     });
+    if(arquivo){
+      baixarBt=h("button",{class:"btn sm",type:"button",title:"Guarda o arquivo no aparelho (Arquivos / Downloads)"},"Baixar");
+      baixarBt.addEventListener("click",()=>{
+        sb.storage.from("fotos").createSignedUrl(r.storage_path,3600,{download:nome}).then(({data,error})=>{
+          if(error){baixarBt.textContent="Falhou: "+error.message;return;}
+          const a=h("a",{href:data.signedUrl,download:nome,hidden:true});document.body.append(a);a.click();a.remove();
+        });
+      });
+    }
   } else if(r.path_local&&location.protocol==="file:"){
     if(ehImg(r.path_local)){
       abrir=h("button",{class:"btn pri sm",type:"button",onclick:()=>abrirViewer("file://"+encodeURI(r.path_local),r.titulo||"Relatório")},"Abrir");
@@ -3785,7 +3793,7 @@ function relLinha(r,vigente){
   return h("div",{class:"ev"},h("span",{class:"d"},dmy(r.data_ref)+" · "),tit,quando," ",
     vigente?h("span",{class:"selo vig"},"Vigente"):null,
     r.storage_path?h("span",{class:"selo "+(vigente?"hist":"hist")},"No banco"):h("span",{class:"selo hist"},"Arquivo no Mac")," ",
-    abrir,r.storage_path?null:anexar,r.storage_path?null:inp);
+    abrir,baixarBt?" ":null,baixarBt,r.storage_path?null:anexar,r.storage_path?null:inp);
 }
 
 (async()=>{const{data:{session}}=await sb.auth.getSession();session?start():loginView();})();
