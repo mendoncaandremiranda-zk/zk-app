@@ -306,6 +306,10 @@ td.su-est{color:var(--muted)}
 .fl-c .foto-fila::after{font-size:7px;padding:1px 3px}
 .fotofull{position:fixed;inset:0;background:rgba(0,0,0,.85);display:grid;place-items:center;z-index:50;cursor:zoom-out}
 .fotofull img{max-width:92vw;max-height:92vh;border-radius:8px}
+.pergunta{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:60;padding:16px}
+.pergunta-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:380px;width:100%;display:grid;gap:10px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.pergunta-t{font:600 15px var(--f-body);color:var(--ink);line-height:1.35}
+.pergunta-b{display:grid;gap:8px}.pergunta-b .btn{min-height:44px;text-align:left}
 .inline-edit{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .inline-edit input{width:72px;font:14px var(--f-mono);padding:4px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink)}
 .inline-edit .meta{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
@@ -829,35 +833,82 @@ function fotoImg(f,cls){const img=h("img",{alt:f.legenda||"Foto",title:(f.legend
   img.addEventListener("click",async()=>{const u=await url();if(!u)return;abrirViewer(u,(f.legenda?f.legenda+" · ":"")+dmy(f.criado_em));});
   url().then(u=>{if(u)img.src=u;});
   return f._fila?h("span",{class:"foto-fila"},img):img;}
-/* botão "+ foto": guarda a foto em bytes na fila, já com o vínculo ao apontamento (quando houver) */
+/* pergunta em janela própria: devolve o valor da opção tocada (null = fechou sem responder) */
+function perguntar(titulo,opcoes,texto){
+  return new Promise(res=>{
+    const ov=h("div",{class:"pergunta"});const fecha=v=>{ov.remove();res(v);};
+    ov.append(h("div",{class:"pergunta-card"},h("div",{class:"pergunta-t"},titulo),texto?h("div",{class:"d"},texto):null,
+      h("div",{class:"pergunta-b"},...opcoes.map(o=>h("button",{class:"btn"+(o.pri?" pri":""),type:"button",onclick:()=>fecha(o.valor)},o.rotulo)))));
+    ov.addEventListener("click",e=>{if(e.target===ov)fecha(null);});
+    document.body.append(ov);});}
+/* regra de 02/11/2026: a foto tirada no dia de um apontamento é, normalmente, dele — o app pergunta na hora, em vez de
+   depender de qual "+ foto" foi tocado. "De hoje" = data de hoje ou registrado hoje; do mais recente ao mais antigo. */
+function apontDeHoje(objTipo,objId,aba){
+  const hoje=hojeIso(),out=[];
+  for(const [tabela,a] of Object.entries(APONT)){
+    if((a.aba||null)!==(aba||null))continue;
+    for(const r of a.rows()){if(!apontOk(r))continue;const o=a.obj(r);if(o[0]!==objTipo||(o[1]||null)!==(objId||null))continue;
+      const d=a.data(r);if(d!==hoje&&!(r.criado_em&&isoDia(r.criado_em)===hoje))continue;
+      out.push({tabela,id:r.id,rot:a.rot(r),data:d,k:(d||"")+"|"+(r.criado_em||"")});}}
+  return out.sort((x,y)=>x.k<y.k?1:-1);}
+/* depois de gravar um apontamento: as fotos avulsas de hoje do mesmo objeto são, normalmente, dele — pergunta e vincula
+   (foto já no banco → update; foto ainda na fila → o vínculo entra no próprio item da fila) */
+async function fotosDoDia(tabela,linha){
+  const a=APONT[tabela];if(!a||!linha||!linha.id)return;const o=a.obj(linha);const aba=a.aba||null,hoje=hojeIso();
+  const soltas=D.fotos.filter(f=>fotoSolta(f)&&f.objeto_tipo===o[0]&&(f.objeto_id||null)===(o[1]||null)&&(f.aba||null)===aba&&isoDia(f.criado_em)===hoje);
+  if(!soltas.length)return;
+  const rot=a.rot(linha)+" · "+dmy(a.data(linha));
+  const v=await perguntar(soltas.length===1?"Há uma foto avulsa de hoje aqui. É deste apontamento?":"Há "+soltas.length+" fotos avulsas de hoje aqui. São deste apontamento?",
+    [{valor:"sim",rotulo:"Sim — "+rot,pri:true},{valor:"nao",rotulo:"Não — continuam avulsas"}]);
+  if(v!=="sim")return;
+  const passos=[];
+  for(const f of soltas){
+    if(f._fila){const it=FILA.itens.find(i=>i.id===f._fila);const l=it&&it.passos&&it.passos[0]&&it.passos[0].linha;
+      if(l){l.apontamento_tabela=tabela;l.apontamento_id=linha.id;it.meta.tabela=tabela;it.meta.apont=linha.id;it.resumo+=" · "+a.rot(linha);await filaPersistir(it);}}
+    else passos.push({op:"update",tabela:"fotos",chave:{id:f.id},valores:{apontamento_tabela:tabela,apontamento_id:linha.id}});}
+  try{if(passos.length)await gravarLote("Fotos · "+rot+" · "+passos.length+" vinculada"+(passos.length>1?"s":""),passos,{semFotos:true});}
+  catch(e){await perguntar("Não deu para vincular as fotos: "+(e?.message||e),[{valor:1,rotulo:"OK"}]);}
+  aplicarFila();}
+/* botão "+ foto": guarda a foto em bytes na fila, já com o vínculo ao apontamento (quando houver). Pelo botão da ficha
+   (sem apontamento), se há apontamento de hoje deste objeto o app pergunta se a foto é dele. */
 function fotoBotao(ctx,cls){
   const inp=h("input",{type:"file",accept:"image/*",hidden:true});
   const btn=h("button",{class:cls||"mais",type:"button",onclick:()=>inp.click()},"+ foto");
   inp.addEventListener("change",async()=>{const file=inp.files[0];if(!file)return;
-    const rot=btn.textContent;btn.textContent="Enviando…";btn.disabled=true;
-    try{const pasta=ctx.tabela?ctx.tabela+"/"+ctx.id:(ctx.aba||"geral");
-      const path=`${ctx.objeto_tipo}/${ctx.objeto_id}/${pasta}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_").replace(/\.[A-Za-z]+$/,"")}.jpg`;
+    const rot=btn.textContent;btn.textContent="Enviando…";btn.disabled=true;let c=ctx;
+    try{
+      if(!ctx.tabela){const cands=apontDeHoje(ctx.objeto_tipo,ctx.objeto_id,ctx.aba||null);
+        if(cands.length){const v=await perguntar("Esta foto é de um apontamento de hoje?",[...cands.slice(0,4).map(x=>({valor:x,rotulo:"Sim — "+x.rot+" · "+dmy(x.data),pri:true})),{valor:"avulsa",rotulo:"Não — foto avulsa"}]);
+          if(v===null){btn.textContent=rot;btn.disabled=false;inp.value="";return;}
+          if(v!=="avulsa")c=Object.assign({},ctx,{tabela:v.tabela,id:v.id,rotulo:v.rot});}}
+      const pasta=c.tabela?c.tabela+"/"+c.id:(c.aba||"geral");
+      const path=`${c.objeto_tipo}/${c.objeto_id}/${pasta}/${Date.now()}_${file.name.replace(/[^A-Za-z0-9_.-]/g,"_").replace(/\.[A-Za-z]+$/,"")}.jpg`;
       const blob=await reduzirFoto(file,2000).catch(()=>file);
       const foto=await blob.arrayBuffer();if(!foto.byteLength)throw new Error("a foto veio vazia — tire outra");
-      const linha={objeto_tipo:ctx.objeto_tipo,objeto_id:ctx.objeto_id,aba:ctx.aba||null,path,autor_email:D.email};
-      if(ctx.tabela){linha.apontamento_tabela=ctx.tabela;linha.apontamento_id=ctx.id;}
-      const nomeObj=ctx.objeto_tipo==="pasto"?(D.pastos.find(p=>p.id===ctx.objeto_id)?.nome||"pasto"):ctx.objeto_tipo==="lote"?lote(ctx.objeto_id):ctx.objeto_tipo==="rebanho"?"Rebanho":(D.estr.find(e=>e.id===ctx.objeto_id)?.nome||"estrutura");
-      const it={id:uuid4(),tipo:"foto",quando:new Date().toISOString(),resumo:"Foto · "+nomeObj+(ctx.tabela?" · "+(ctx.rotulo||"apontamento"):""),
+      const linha={objeto_tipo:c.objeto_tipo,objeto_id:c.objeto_id,aba:c.aba||null,path,autor_email:D.email};
+      if(c.tabela){linha.apontamento_tabela=c.tabela;linha.apontamento_id=c.id;}
+      const nomeObj=c.objeto_tipo==="pasto"?(D.pastos.find(p=>p.id===c.objeto_id)?.nome||"pasto"):c.objeto_tipo==="lote"?lote(c.objeto_id):c.objeto_tipo==="rebanho"?"Rebanho":(D.estr.find(e=>e.id===c.objeto_id)?.nome||"estrutura");
+      const it={id:uuid4(),tipo:"foto",quando:new Date().toISOString(),resumo:"Foto · "+nomeObj+(c.tabela?" · "+(c.rotulo||"apontamento"):""),
         estado:"aguardando",tentativas:0,autor:D.email||null,foto,fotoTipo:blob.type||"image/jpeg",
-        meta:{path,objeto_tipo:ctx.objeto_tipo,objeto_id:ctx.objeto_id,aba:ctx.aba||null,tabela:ctx.tabela||null,apont:ctx.id||null},
+        meta:{path,objeto_tipo:c.objeto_tipo,objeto_id:c.objeto_id,aba:c.aba||null,tabela:c.tabela||null,apont:c.id||null},
         passos:[{op:"insert",tabela:"fotos",linha}]};
       await filaAdicionar(it);const r=await esperarEnvio(it);
       if(!r.fila){try{await carregar();}catch(e){}}
-      fotoRefazer(btn,ctx);
+      fotoRefazer(btn,ctx,c);
     }catch(e){btn.textContent="Falhou: "+(e?.message||e);btn.disabled=false;setTimeout(()=>{if(btn.isConnected){btn.textContent=rot;}},4000);return;}
   });
   return h("span",{class:"fl-btn"},btn,inp);}
-/* refaz só o bloco de fotos de onde o botão veio — a ficha (e qualquer formulário em preenchimento) fica como está */
-function fotoRefazer(btn,ctx){
+/* refaz só o bloco de fotos de onde o botão veio — a ficha (e qualquer formulário em preenchimento) fica como está;
+   foto da ficha vinculada pela pergunta refaz também a linha do apontamento que a recebeu */
+function fotoRefazer(btn,ctx,c){
+  c=c||ctx;
   const fl=btn.closest(".fl");
   if(fl&&ctx.tabela){fl.replaceWith(fotoLinha(ctx.tabela,ctx.id,ctx,!fl.classList.contains("fl-c")));return;}
   const strip=btn.closest(".fotos-strip");
-  if(strip){strip.replaceWith(fotoStrip(ctx.objeto_tipo,ctx.objeto_id,ctx.aba));return;}
+  if(strip){strip.replaceWith(fotoStrip(ctx.objeto_tipo,ctx.objeto_id,ctx.aba));
+    if(c.tabela){const el=document.querySelector('.fl[data-ap="'+c.tabela+':'+c.id+'"]');
+      if(el)el.replaceWith(fotoLinha(c.tabela,c.id,{objeto_tipo:c.objeto_tipo,objeto_id:c.objeto_id,aba:c.aba,rotulo:c.rotulo},!el.classList.contains("fl-c")));}
+    return;}
   rerenderSeguro();}
 /* linha de fotos de um apontamento: em destaque (miniaturas) quando é o último do objeto; compacta no histórico */
 function fotoLinha(tabela,id,ctx,destaque){
@@ -865,8 +916,8 @@ function fotoLinha(tabela,id,ctx,destaque){
   const fs=fotosDe(tabela,id);
   const c=Object.assign({tabela,id},ctx||{});
   if(destaque==null){const o=APONT[tabela]&&apontRow(tabela,id)?APONT[tabela].obj(apontRow(tabela,id)):[c.objeto_tipo,c.objeto_id];destaque=apontUltimoId(tabela,o[0],o[1])===id;}
-  if(destaque)return h("div",{class:"fotogrid fl"},...fs.map(f=>fotoImg(f)),fotoBotao(c));
-  return h("div",{class:"fl fl-c"},...fs.map(f=>fotoImg(f)),fotoBotao(c,"fl-mais"));}
+  if(destaque)return h("div",{class:"fotogrid fl","data-ap":tabela+":"+id},...fs.map(f=>fotoImg(f)),fotoBotao(c));
+  return h("div",{class:"fl fl-c","data-ap":tabela+":"+id},...fs.map(f=>fotoImg(f)),fotoBotao(c,"fl-mais"));}
 /* a foto da leitura pela foto vem da tentativa (servidor); entra como primeira miniatura da leitura */
 function fotoTentativa(c){if(!c||c.origem!=="foto"||!c.tentativa_id)return null;const t=(D.tentChuva||[]).find(t=>t.id===c.tentativa_id||t.leitura_id===c.id);
   if(!t||!t.foto_path)return null;const img=h("img",{alt:"Foto da leitura",title:"Foto da leitura · "+dmy(c.data)});
@@ -1822,7 +1873,7 @@ function regInspecao(eid){
   const f={funcionamento:true,limpeza:true,qualidade:true};
   const chip=(k,l)=>{const cid="ri-"+k;const inp=h("input",{type:"checkbox",id:cid});inp.checked=true;inp.addEventListener("change",()=>f[k]=inp.checked);
     return h("label",{class:"chip",for:cid},inp,h("span",{},l));};
-  const data=h("input",{type:"date",value:new Date().toISOString().slice(0,10)});
+  const data=h("input",{type:"date",value:hojeIso(),max:hojeIso()});
   const obs=h("input",{type:"text",placeholder:"observação"});
   const btn=h("button",{class:"btn pri sm",type:"button",onclick:async()=>{btn.disabled=true;btn.textContent="Gravando…";
     try{const r=await gravarLote("Inspeção · "+(D.estr.find(e=>e.id===eid)?.nome||"")+" · "+dmy(data.value).slice(0,5),[{op:"insert",tabela:"inspecoes_agua",linha:{estrutura_id:eid,data:data.value,...f,obs:obs.value||null,autor_email:D.email}}]);
@@ -1833,7 +1884,7 @@ function regInspecao(eid){
     h("div",{class:"chips"},chip("funcionamento","Funcionando"),chip("limpeza","Limpo"),chip("qualidade","Água boa")),
     h("div",{class:"grid2"},data,obs),btn);}
 function regAbastecimento(eid){
-  const data=h("input",{type:"date",value:new Date().toISOString().slice(0,10)});
+  const data=h("input",{type:"date",value:hojeIso(),max:hojeIso()});
   const alimento=h("select",{},["Ração Recria gado 3","Feno","Phoscerrado Mineral 160","Sal","Outro"].map(o=>h("option",{value:o},o)));
   const kg=h("input",{inputmode:"decimal",placeholder:"kg"});
   const obs=h("input",{type:"text",placeholder:"observação"});
@@ -2476,9 +2527,14 @@ const semRede=e=>pareceOffline(e)||/tempo esgotado|abort|timeout|timed out|netwo
 /* --- gravação: o caminho único de todos os apontamentos --- */
 async function gravarLote(resumo,passos,op={}){
   if(!passos||!passos.length)return{ok:true};
+  /* apontamento novo: o id nasce aqui, para as fotos avulsas de hoje poderem apontar para ele (mesmo sem conexão) */
+  const ap=passos.find(p=>p.op==="insert"&&p.linha&&APONT[p.tabela])||null;
+  if(ap&&!ap.linha.id)ap.linha.id=uuid4();
   const it={id:uuid4(),tipo:"lote",quando:new Date().toISOString(),resumo,passos,estado:"aguardando",tentativas:0,autor:D.email||null};
   await filaAdicionar(it);
-  return esperarEnvio(it,op);
+  const r=await esperarEnvio(it,op);
+  if(ap&&!op.semFotos)await fotosDoDia(ap.tabela,ap.linha);
+  return r;
 }
 /* envia este item (e os anteriores, na ordem). Devolve {ok} quando gravou; {fila:true} quando ficou guardado
    sem conexão; lança erro quando o banco recusou (o item sai da fila — o usuário vê o motivo e corrige) */
@@ -2951,7 +3007,7 @@ function viewChuvas(main){
 function viewPremissas(main){
   const vig=D.prem.filter(p=>!p.vigente_ate).sort((a,b)=>(premLabel(a)+a.escopo)<(premLabel(b)+b.escopo)?-1:1);
   const hist=D.prem.filter(p=>p.vigente_ate).sort((a,b)=>a.vigente_ate<b.vigente_ate?1:-1);
-  const hoje=new Date().toISOString().slice(0,10);
+  const hoje=hojeIso();
   async function gravarAjuste(row,valor,desde,btn){
     if(!valor){btn.textContent="Informe o valor";return;}
     btn.disabled=true;btn.textContent="Gravando…";
