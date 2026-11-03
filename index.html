@@ -663,7 +663,8 @@ async function carregar(){
     q("abastecimentos_cocho","id,estrutura_id,data,alimento,quantidade_kg,obs,autor_email",["data",{ascending:false}]),
     q("solo_pastos","pasto_id,ano,camada,atributo,valor,unidade,metodo"),
     q("premissas","id,chave,escopo,valor,unidade,vigente_desde,vigente_ate,autor_email,obs,criado_em",["vigente_desde",{ascending:false}]),
-    q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}]),
+    q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path,atualizado_em",["data_ref",{ascending:false}])
+      .catch(()=>q("relatorios","id,tipo,data_ref,titulo,path_local,storage_path",["data_ref",{ascending:false}])),
     /* leituras de chuva: tolerante — sem a tabela, o app segue funcionando com a lista vazia */
     q("leituras_chuva","id,estrutura_id,data,mm,obs,origem,autor_email,criado_em",["data",{ascending:false}])
       .catch(()=>q("leituras_chuva","id,estrutura_id,data,mm,obs,autor_email,criado_em",["data",{ascending:false}])).catch(()=>[]),
@@ -3722,30 +3723,39 @@ function viewSimulador(main){
 
 /* ---------- vista: relatórios ---------- */
 function viewRelatorios(main){
-  /* aba de relatórios: a Posição do Ciclo (uma por data-base; gerada a cada atualização do modelo e toda segunda);
-     novos relatórios entram aqui como novos blocos */
+  /* aba de relatórios: a Posição do Ciclo (uma por data-base; gerada a cada atualização do modelo e toda segunda) e a
+     planilha do modelo recalculada (uma por data-base — regra do André, 03/11/2026); novos relatórios entram aqui como novos blocos */
+  const pos=D.rel.filter(r=>r.tipo!=="modelo"),mod=D.rel.filter(r=>r.tipo==="modelo");
+  const bloco=(lista,nomePasta,vazio)=>lista.length?h("div",{},
+      relLinha(lista[0],true),
+      lista.length>1?h("details",{class:"pasta-rel"},
+        h("summary",{},nomePasta+" ("+Math.min(3,lista.length-1)+")"),
+        ...lista.slice(1,4).map(r=>relLinha(r,false))):null
+    ):h("div",{class:"note"},vazio);
   main.replaceChildren(h("section",{class:"card"},
     h("h2",{style:"font-family:var(--f-display);font-stretch:85%;margin:0 0 10px"},"Relatórios"),
     h("div",{class:"badge"},"Posição do Ciclo"),
-    D.rel.length?h("div",{},
-      relLinha(D.rel[0],true),
-      D.rel.length>1?h("details",{class:"pasta-rel"},
-        h("summary",{},"Posições anteriores ("+Math.min(3,D.rel.length-1)+")"),
-        ...D.rel.slice(1,4).map(r=>relLinha(r,false))):null
-    ):h("div",{class:"note"},"Nenhuma posição registrada no banco ainda."),
-    h("p",{class:"note",style:"margin-top:8px"},"Uma posição por data-base, gerada a cada atualização do modelo e toda segunda-feira. A vigente fica em destaque; a pasta guarda as 3 anteriores — as mais antigas saem da exibição, mas permanecem registradas no banco.")));
+    bloco(pos,"Posições anteriores","Nenhuma posição registrada no banco ainda."),
+    h("p",{class:"note",style:"margin-top:8px"},"Uma posição por data-base, gerada a cada atualização do modelo e toda segunda-feira. A vigente fica em destaque; a pasta guarda as 3 anteriores — as mais antigas saem da exibição, mas permanecem registradas no banco."),
+    h("div",{class:"badge",style:"margin-top:14px"},"Modelo de gestão — planilha"),
+    bloco(mod,"Versões anteriores","A planilha ainda não foi anexada ao banco — o Mac anexa na próxima atualização do modelo."),
+    h("p",{class:"note",style:"margin-top:8px"},"A planilha completa do modelo (Gestao_Agropecuaria_Dois_Amigos.xlsx) como ficou na última atualização — valores recalculados, abre no Excel ou no Numbers. Uma versão por data-base; a vigente é a mais recente.")));
 }
 
 function relLinha(r,vigente){
   let abrir;
   const ehImg=p=>/\.(png|jpe?g|gif|webp)$/i.test(p||"");
+  const ehArquivo=p=>/\.(xlsx|xlsm|csv|pdf|docx)$/i.test(p||"");                     /* não abre no navegador: baixa */
   if(r.storage_path){
-    abrir=h("button",{class:"btn pri sm",type:"button"},"Abrir");
+    const baixar=ehArquivo(r.storage_path);
+    abrir=h("button",{class:"btn pri sm",type:"button"},baixar?"Baixar":"Abrir");
     abrir.addEventListener("click",()=>{
-      const w=ehImg(r.storage_path)?null:window.open("about:blank","_blank");
-      sb.storage.from("fotos").createSignedUrl(r.storage_path,3600).then(({data,error})=>{
+      const w=ehImg(r.storage_path)||baixar?null:window.open("about:blank","_blank");
+      const nome=r.storage_path.split("/").pop();
+      sb.storage.from("fotos").createSignedUrl(r.storage_path,3600,baixar?{download:nome}:undefined).then(({data,error})=>{
         if(error){if(w)w.close();abrir.textContent="Falhou: "+error.message;return;}
         if(ehImg(r.storage_path))abrirViewer(data.signedUrl,r.titulo||"Relatório");
+        else if(baixar){const a=h("a",{href:data.signedUrl,download:nome,hidden:true});document.body.append(a);a.click();a.remove();}
         else if(w)w.location=data.signedUrl;else location.href=data.signedUrl;
       });
     });
@@ -3770,8 +3780,9 @@ function relLinha(r,vigente){
     if(e2){anexar.textContent="Falhou: "+e2.message;anexar.disabled=false;return;}
     await carregar();rerender();
   });
-  const tit=(r.titulo||"Posição do Ciclo").replace(/\s—\s(data-base\s)?\d{2}\/\d{2}\/\d{4}$/,"");   // a data já abre a linha
-  return h("div",{class:"ev"},h("span",{class:"d"},dmy(r.data_ref)+" · "),tit," ",
+  const tit=(r.titulo||(r.tipo==="modelo"?"Modelo de gestão":"Posição do Ciclo")).replace(/\s—\s(data-base\s)?\d{2}\/\d{2}\/\d{4}$/,"");   // a data já abre a linha
+  const quando=r.tipo==="modelo"&&r.atualizado_em?(()=>{const x=new Date(r.atualizado_em);return h("span",{class:"d"}," · recalculada "+dmy(isoDia(x)).slice(0,5)+" "+String(x.getHours()).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0"));})():null;
+  return h("div",{class:"ev"},h("span",{class:"d"},dmy(r.data_ref)+" · "),tit,quando," ",
     vigente?h("span",{class:"selo vig"},"Vigente"):null,
     r.storage_path?h("span",{class:"selo "+(vigente?"hist":"hist")},"No banco"):h("span",{class:"selo hist"},"Arquivo no Mac")," ",
     abrir,r.storage_path?null:anexar,r.storage_path?null:inp);
